@@ -88,23 +88,40 @@ export function chatRoutes(context: vscode.ExtensionContext) {
             }
         }
 
-        // Fallback: VS Code commands
+        // Fallback: VS Code commands — fire all relevant commands
+        // Different VS Code versions / contexts use different command IDs.
+        // We fire all of them because executeCommand silently succeeds
+        // when the command exists but has nothing to act on.
         try {
             if (action === 'accept') {
-                await tryCommand(
+                await fireAll(
+                    // Agent mode edit review (VS Code 2025+)
+                    'workbench.action.chat.acceptEditRequest',
                     'chatEditor.action.accept',
+                    // Inline chat (Ctrl+I) edits
                     'inlineChat.acceptChanges',
-                    'editor.action.inlineSuggest.commit'
+                    'inlineChat.accept',
+                    // Inline completions (ghost text)
+                    'editor.action.inlineSuggest.commit',
+                    // Notebook cell edits
+                    'notebook.cell.chat.acceptChanges'
                 );
             } else {
-                await tryCommand(
+                await fireAll(
+                    // Agent mode edit review (VS Code 2025+)
+                    'workbench.action.chat.rejectEditRequest',
                     'chatEditor.action.reject',
+                    // Inline chat (Ctrl+I) edits
                     'inlineChat.discard',
-                    'editor.action.inlineSuggest.hide'
+                    'inlineChat.close',
+                    // Inline completions (ghost text)
+                    'editor.action.inlineSuggest.hide',
+                    // Notebook cell edits
+                    'notebook.cell.chat.discard'
                 );
             }
-            res.json({ success: true, method: 'vscode-command' });
             addActivity('action', `${action === 'accept' ? '✅ Accepted' : '❌ Rejected'} changes`);
+            res.json({ success: true, method: 'vscode-command' });
         } catch (err: any) {
             res.json({ success: false, error: err.message });
         }
@@ -127,11 +144,11 @@ export function chatRoutes(context: vscode.ExtensionContext) {
     return router;
 }
 
-async function tryCommand(...commands: string[]) {
-    for (const cmd of commands) {
-        try {
-            await vscode.commands.executeCommand(cmd);
-            return;
-        } catch { /* try next */ }
-    }
+/** Fire all commands in parallel — each one silently succeeds if
+ *  it exists but has nothing to act on, so we fire them all to
+ *  cover whichever editing context is currently active. */
+async function fireAll(...commands: string[]) {
+    await Promise.allSettled(
+        commands.map(cmd => vscode.commands.executeCommand(cmd))
+    );
 }
