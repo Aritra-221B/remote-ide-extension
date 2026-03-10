@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Remote Control</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="app" class="screen">
+        <header>
+            <span class="logo">📱 Remote Control</span>
+            <span id="status-dot" class="status-dot"></span>
+        </header>
+
+        <div class="quick-actions">
+            <button onclick="sendAction('accept', this)" class="btn-accept">✅ Accept</button>
+            <button onclick="sendAction('reject', this)" class="btn-reject">❌ Reject</button>
+        </div>
+
+        <div id="ide-status-bar" class="ide-status-bar">
+            <span id="ide-active-file" class="ide-file">No file open</span>
+            <span id="ide-cursor-pos" class="ide-cursor"></span>
+            <span id="ide-diagnostics" class="ide-diag"></span>
+        </div>
+
+        <nav class="tabs">
+            <button class="tab active" data-tab="chat">💬 Chat</button>
+            <button class="tab" data-tab="files">📂 Files</button>
+            <button class="tab" data-tab="terminal">💻 Term</button>
+            <button class="tab" data-tab="usage">📊 Usage</button>
+            <button class="tab" data-tab="bugs">🐛 Bugs</button>
+            <button class="tab" data-tab="screenshot">📸 Screen</button>
+        </nav>
+
+        <div class="tab-content">
+            <!-- Chat Tab -->
+            <div id="tab-chat" class="tab-panel active">
+                <div id="chat-container" class="chat-messages">
+                    <p class="placeholder">Connecting to IDE chat...</p>
+                </div>
+                <div class="chat-input-bar">
+                    <textarea id="prompt-input" placeholder="Type a prompt..." rows="2"></textarea>
+                    <button onclick="sendPrompt()" class="btn-send">▶</button>
+                </div>
+            </div>
+
+            <!-- Files Tab -->
+            <div id="tab-files" class="tab-panel hidden">
+                <div class="breadcrumb" id="file-breadcrumb">
+                    <button onclick="navigateFiles('')" class="crumb">🏠 root</button>
+                </div>
+                <div id="file-list" class="file-list"></div>
+                <div id="file-viewer" class="file-viewer hidden">
+                    <div class="file-viewer-header">
+                        <span id="file-viewer-name"></span>
+                        <button onclick="closeFileViewer()">✕</button>
+                    </div>
+                    <pre id="file-viewer-content"></pre>
+                </div>
+            </div>
+
+            <!-- Terminal Tab -->
+            <div id="tab-terminal" class="tab-panel hidden">
+                <div id="terminal-output" class="terminal-output"></div>
+                <div class="terminal-input-bar">
+                    <input id="cmd-input" type="text" placeholder="Enter command..." />
+                    <button onclick="executeCommand()" class="btn-send">▶</button>
+                </div>
+            </div>
+
+            <!-- Usage Tab -->
+            <div id="tab-usage" class="tab-panel hidden">
+                <div class="kpi-row" id="usage-kpis"></div>
+                <div id="usage-details" class="usage-details"></div>
+                <button onclick="refreshUsage()" class="btn-secondary">🔄 Refresh</button>
+            </div>
+
+            <!-- Bugs Tab -->
+            <div id="tab-bugs" class="tab-panel hidden">
+                <button onclick="showNewBugForm()" class="btn-primary">🐛 Report Bug</button>
+                <div id="new-bug-form" class="bug-form hidden">
+                    <input id="bug-title" type="text" placeholder="Bug title" />
+                    <textarea id="bug-desc" placeholder="Description..." rows="3"></textarea>
+                    <textarea id="bug-steps" placeholder="Repro steps (one per line)" rows="3"></textarea>
+                    <div class="form-actions">
+                        <button onclick="submitBug()" class="btn-primary">Submit</button>
+                        <button onclick="hideNewBugForm()" class="btn-secondary">Cancel</button>
+                    </div>
+                </div>
+                <div id="bug-list" class="bug-list"></div>
+            </div>
+
+            <!-- Screenshot Tab -->
+            <div id="tab-screenshot" class="tab-panel hidden">
+                <button onclick="captureScreenshot()" class="btn-primary">📸 Capture</button>
+                <div class="screenshot-container">
+                    <img id="screenshot-img" src="" alt="IDE Screenshot" />
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

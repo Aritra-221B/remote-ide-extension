@@ -1,0 +1,106 @@
+{
+  "name": "remote-ide-extension",
+  "displayName": "Remote IDE Extension",
+  "description": "Control your IDE remotely from your phone via Cloudflare Tunnel",
+  "version": "0.1.0",
+  "publisher": "Aritra-221B",
+  "author": {
+    "name": "Aritra Banerjee",
+    "email": "aritrab.work625@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Aritra-221B/remote-ide-extension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Aritra-221B/remote-ide-extension/issues"
+  },
+  "homepage": "https://github.com/Aritra-221B/remote-ide-extension#readme",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "main": "./dist/extension.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "package": "vsce package"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "remote",
+    "mobile",
+    "phone",
+    "cloudflare",
+    "tunnel",
+    "copilot",
+    "dashboard"
+  ],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "remoteControl.toggle",
+        "title": "Remote Control: Toggle ON/OFF"
+      },
+      {
+        "command": "remoteControl.showSettings",
+        "title": "Remote Control: Settings"
+      },
+      {
+        "command": "remoteControl.showQR",
+        "title": "Remote Control: Show QR Code"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "remoteControl.toggle",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r"
+      }
+    ],
+    "configuration": {
+      "title": "Remote Control",
+      "properties": {
+        "remoteControl.pin": {
+          "type": "string",
+          "default": "",
+          "description": "Optional PIN code (4+ digits) for extra security"
+        },
+        "remoteControl.tunnelMode": {
+          "type": "string",
+          "enum": [
+            "quick",
+            "named"
+          ],
+          "default": "quick",
+          "description": "Cloudflare tunnel mode: 'quick' (no account needed) or 'named' (requires token)"
+        },
+        "remoteControl.tunnelToken": {
+          "type": "string",
+          "default": "",
+          "description": "Cloudflare tunnel token (required for 'named' mode)"
+        }
+      }
+    }
+  },
+  "type": "commonjs",
+  "dependencies": {
+    "chrome-remote-interface": "^0.34.0",
+    "express": "^5.2.1",
+    "qrcode": "^1.5.4",
+    "screenshot-desktop": "^1.15.3",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.3.5",
+    "@types/qrcode": "^1.5.6",
+    "@types/uuid": "^10.0.0",
+    "@types/vscode": "^1.109.0",
+    "@vscode/vsce": "^3.7.1",
+    "typescript": "^5.9.3"
+  }
+}

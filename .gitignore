@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# VS Code extension package
+*.vsix
+
+# Cloudflare binary (downloaded at runtime)
+cloudflared*
+
+# Screenshots (captured at runtime)
+*.png
+*.jpg
+!src/dashboard/**/*.png
+
+# Temporary
+tmp/
+temp/
