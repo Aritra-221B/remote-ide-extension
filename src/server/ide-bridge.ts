@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { sseManager } from './sse';
 import { addActivity } from './activity';
+import { markFileEdited } from './edit-state';
 
 /**
  * Bridges VS Code events to SSE broadcasts so the mobile dashboard
@@ -44,6 +45,7 @@ export function initIDEBridge(context: vscode.ExtensionContext) {
             file: doc.uri.fsPath,
             languageId: doc.languageId,
         });
+        markFileEdited();
         addActivity('file-save', `Saved ${shortP(doc.uri.fsPath)}`);
     }));
 
@@ -58,6 +60,7 @@ export function initIDEBridge(context: vscode.ExtensionContext) {
                 dirty: e.document.isDirty,
                 lineCount: e.document.lineCount,
             });
+            markFileEdited();
             addActivity('file-edit', `Edited ${shortP(e.document.uri.fsPath)}`);
         }, 500); // debounce 500ms to avoid flooding
     }));

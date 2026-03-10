@@ -4,6 +4,7 @@ import { CDPClient } from '../cdp';
 import { sseManager } from '../sse';
 import { addActivity, getRecentActivity } from '../activity';
 import { getChatMessages } from '../chat-reader';
+import { markPromptSent, markReviewed, isPendingReview } from '../edit-state';
 
 const cdp = new CDPClient();
 let cdpAvailable = false;
@@ -58,6 +59,7 @@ export function chatRoutes(context: vscode.ExtensionContext) {
         if (cdpAvailable) {
             const success = await cdp.sendPrompt(prompt);
             addActivity('prompt', `Prompt: ${prompt.substring(0, 100)}`);
+            markPromptSent();
             res.json({ success });
             return;
         }
@@ -65,6 +67,7 @@ export function chatRoutes(context: vscode.ExtensionContext) {
         try {
             await vscode.commands.executeCommand('workbench.action.chat.open', { query: prompt });
             addActivity('prompt', `Prompt: ${prompt.substring(0, 100)}`);
+            markPromptSent();
             res.json({ success: true, method: 'vscode-command' });
         } catch {
             res.json({ success: false, error: 'Failed to send prompt' });
@@ -83,6 +86,7 @@ export function chatRoutes(context: vscode.ExtensionContext) {
             const success = await cdp.clickAction(action);
             if (success) {
                 addActivity('action', `${action === 'accept' ? '\u2705 Accepted' : '\u274c Rejected'} changes`);
+                markReviewed();
                 res.json({ success: true, method: 'cdp' });
                 return;
             }
@@ -95,9 +99,11 @@ export function chatRoutes(context: vscode.ExtensionContext) {
         try {
             if (action === 'accept') {
                 await fireAll(
-                    // Agent mode edit review (VS Code 2025+)
+                    // Agent mode edit review — Keep button (VS Code 2025+)
                     'workbench.action.chat.acceptEditRequest',
                     'chatEditor.action.accept',
+                    'chat.acceptChanges',
+                    'chat.keepEdit',
                     // Inline chat (Ctrl+I) edits
                     'inlineChat.acceptChanges',
                     'inlineChat.accept',
@@ -108,9 +114,11 @@ export function chatRoutes(context: vscode.ExtensionContext) {
                 );
             } else {
                 await fireAll(
-                    // Agent mode edit review (VS Code 2025+)
+                    // Agent mode edit review — Undo button (VS Code 2025+)
                     'workbench.action.chat.rejectEditRequest',
                     'chatEditor.action.reject',
+                    'chat.undoChanges',
+                    'chat.undoEdit',
                     // Inline chat (Ctrl+I) edits
                     'inlineChat.discard',
                     'inlineChat.close',
@@ -121,6 +129,7 @@ export function chatRoutes(context: vscode.ExtensionContext) {
                 );
             }
             addActivity('action', `${action === 'accept' ? '✅ Accepted' : '❌ Rejected'} changes`);
+            markReviewed();
             res.json({ success: true, method: 'vscode-command' });
         } catch (err: any) {
             res.json({ success: false, error: err.message });
@@ -129,6 +138,24 @@ export function chatRoutes(context: vscode.ExtensionContext) {
 
     router.get('/status', (req, res) => {
         res.json({ success: true, cdpConnected: cdpAvailable });
+    });
+
+    // Debug: list available chat/edit command IDs in this VS Code version
+    router.get('/commands', async (req, res) => {
+        try {
+            const all = await vscode.commands.getCommands(true);
+            const chatCmds = all.filter(c =>
+                c.includes('chat') || c.includes('inlineChat') ||
+                c.includes('inlineSuggest') || c.includes('chatEditor')
+            ).sort();
+            res.json({ success: true, commands: chatCmds });
+        } catch (err: any) {
+            res.json({ success: false, error: err.message });
+        }
+    });
+
+    router.get('/pending', (req, res) => {
+        res.json({ success: true, pending: isPendingReview() });
     });
 
     router.get('/activity', (req, res) => {

@@ -84,16 +84,25 @@ export class CDPClient {
 
     async clickAction(action: 'accept' | 'reject'): Promise<boolean> {
         if (!this.client) { return false; }
-        const buttonText = action === 'accept' ? 'Accept' : 'Discard';
+        // VS Code shows "Keep" / "Undo" (2025+) or "Accept" / "Discard" (older)
+        const labels = action === 'accept'
+            ? ['Keep', 'Accept']
+            : ['Undo', 'Discard', 'Reject'];
         try {
             const result = await this.client.Runtime.evaluate({
                 expression: `
                     (() => {
-                        const buttons = document.querySelectorAll('button');
+                        const labels = ${JSON.stringify(labels)};
+                        const buttons = document.querySelectorAll('button, [role="button"], .monaco-button');
                         for (const btn of buttons) {
-                            if (btn.textContent.includes('${buttonText}')) {
-                                btn.click();
-                                return true;
+                            const text = (btn.textContent || '').trim();
+                            const title = (btn.getAttribute('title') || '').trim();
+                            const aria = (btn.getAttribute('aria-label') || '').trim();
+                            for (const label of labels) {
+                                if (text === label || title.includes(label) || aria.includes(label)) {
+                                    btn.click();
+                                    return true;
+                                }
                             }
                         }
                         return false;

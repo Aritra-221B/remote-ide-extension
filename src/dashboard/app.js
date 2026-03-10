@@ -4,6 +4,7 @@ const TOKEN = params.get('token') || '';
 const BASE = window.location.origin;
 let currentPath = '';
 let eventSource = null;
+let promptPending = false; // true after sending a prompt, until accept/reject
 
 // === SVG Icon Helper ===
 function icon(name, size = 16) {
@@ -81,6 +82,7 @@ function connectSSE() {
     eventSource.addEventListener('ide-file-saved', (e) => {
         const data = JSON.parse(e.data);
         showToast(`Saved: ${shortPath(data.file)}`);
+        if (promptPending) toggleQuickActions(true);
     });
 
     eventSource.addEventListener('ide-file-changed', (e) => {
@@ -89,6 +91,7 @@ function connectSSE() {
         if (el && data.file) {
             el.textContent = (data.dirty ? '● ' : '') + shortPath(data.file);
         }
+        if (promptPending) toggleQuickActions(true);
     });
 
     eventSource.addEventListener('ide-diagnostics', (e) => {
@@ -115,6 +118,11 @@ function connectSSE() {
     eventSource.addEventListener('ide-window-state', (e) => {
         const data = JSON.parse(e.data);
         document.getElementById('status-dot')?.classList.toggle('focused', data.focused);
+    });
+
+    eventSource.addEventListener('pending-review', (e) => {
+        const data = JSON.parse(e.data);
+        toggleQuickActions(data.pending);
     });
 
     eventSource.onerror = () => {
@@ -350,6 +358,7 @@ async function sendPrompt() {
     const prompt = input.value.trim();
     if (!prompt) return;
     input.value = '';
+    promptPending = true;
     appendActivityEntry({
         id: Date.now(), time: Date.now(), type: 'prompt',
         text: `Prompt: ${prompt.substring(0, 100)}`,
@@ -370,9 +379,16 @@ async function sendAction(action, btnEl) {
         });
         if (data.success) {
             showToast(action === 'accept' ? 'Accepted' : 'Rejected');
+            promptPending = false;
+            toggleQuickActions(false);
         }
     } catch (e) { console.error('sendAction error', e); }
     setTimeout(() => { if (btn) btn.style.opacity = '1'; }, 500);
+}
+
+function toggleQuickActions(show) {
+    const el = document.getElementById('quick-actions');
+    if (el) el.classList.toggle('hidden', !show);
 }
 
 // Prompt on Enter (Shift+Enter for newline)
@@ -626,6 +642,14 @@ function escapeHtml(str) {
 connectSSE();
 loadChat();
 fetchIDEStatus();
+checkPendingReview();
+
+async function checkPendingReview() {
+    try {
+        const data = await api('/chat/pending');
+        if (data.success) toggleQuickActions(data.pending);
+    } catch { /* ignore */ }
+}
 
 // === IDE Real-time Helpers ===
 function shortPath(fullPath) {
