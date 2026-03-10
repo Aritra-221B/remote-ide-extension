@@ -119,7 +119,7 @@ async function runTests() {
 
     // 5. Files: read a file
     res = await fetch('/api/files/read?token=' + FAKE_TOKEN + '&path=package.json');
-    assert('Reads package.json', res.data.success === true && res.data.content.includes('remote-control'));
+    assert('Reads package.json', res.data.success === true && res.data.content.includes('remote-ide-extension'));
 
     // 6. Files: path traversal protection
     res = await fetch('/api/files/read?token=' + FAKE_TOKEN + '&path=../../etc/passwd');

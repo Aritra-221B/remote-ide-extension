@@ -5,6 +5,17 @@ const BASE = window.location.origin;
 let currentPath = '';
 let eventSource = null;
 
+// === SVG Icon Helper ===
+function icon(name, size = 16) {
+    return `<svg width="${size}" height="${size}"><use href="#i-${name}"/></svg>`;
+}
+
+// Activity type → icon mapping
+const ACTIVITY_ICON_MAP = {
+    'prompt': 'chat', 'action': 'zap', 'file-edit': 'file',
+    'file-save': 'file', 'error': 'x', 'info': 'file', 'terminal': 'terminal'
+};
+
 // === API Helper ===
 async function api(endpoint, options = {}) {
     const url = new URL(`/api${endpoint}`, BASE);
@@ -24,7 +35,9 @@ function connectSSE() {
 
     eventSource.addEventListener('connected', () => {
         sseConnected = true;
-        document.getElementById('status-dot').classList.add('connected');
+        const dot = document.getElementById('status-dot');
+        dot.classList.add('connected');
+        document.getElementById('status-label').textContent = 'Connected';
     });
 
     eventSource.addEventListener('chat-update', (e) => {
@@ -53,7 +66,6 @@ function connectSSE() {
         const data = JSON.parse(e.data);
         const output = document.getElementById('terminal-output');
         output.textContent += data.data;
-        // Keep only last ~10000 chars to avoid memory bloat
         if (output.textContent.length > 10000) {
             output.textContent = output.textContent.slice(-8000);
         }
@@ -68,7 +80,7 @@ function connectSSE() {
 
     eventSource.addEventListener('ide-file-saved', (e) => {
         const data = JSON.parse(e.data);
-        showToast(`💾 Saved: ${shortPath(data.file)}`);
+        showToast(`Saved: ${shortPath(data.file)}`);
     });
 
     eventSource.addEventListener('ide-file-changed', (e) => {
@@ -107,15 +119,15 @@ function connectSSE() {
 
     eventSource.onerror = () => {
         sseConnected = false;
-        document.getElementById('status-dot').classList.remove('connected');
-        // Reconnect after 3 seconds
+        const dot = document.getElementById('status-dot');
+        dot.classList.remove('connected');
+        document.getElementById('status-label').textContent = 'Offline';
         setTimeout(() => {
             if (eventSource) eventSource.close();
             connectSSE();
         }, 3000);
     };
 
-    // Fallback: if SSE doesn't connect in 5s, use polling for status
     setTimeout(() => {
         if (!sseConnected) startStatusPolling();
     }, 5000);
@@ -123,29 +135,31 @@ function connectSSE() {
 
 function startStatusPolling() {
     if (sseConnected) return;
-    // Try a simple ping to confirm the server is reachable
     setInterval(async () => {
         try {
             const data = await api('/chat/status');
             if (data.success) {
                 document.getElementById('status-dot').classList.add('connected');
+                document.getElementById('status-label').textContent = 'Connected';
             }
         } catch {
             document.getElementById('status-dot').classList.remove('connected');
+            document.getElementById('status-label').textContent = 'Offline';
         }
     }, 5000);
 }
 
-// === Tabs ===
-document.querySelectorAll('.tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
-        tab.classList.add('active');
-        const panel = document.getElementById(`tab-${tab.dataset.tab}`);
-        panel.classList.remove('hidden');
+// === Tab Navigation (Bottom Nav) ===
+document.querySelectorAll('.nav-item').forEach(navBtn => {
+    navBtn.addEventListener('click', () => {
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(p => {
+            p.classList.remove('active');
+        });
+        navBtn.classList.add('active');
+        const panel = document.getElementById(`tab-${navBtn.dataset.tab}`);
         panel.classList.add('active');
-        onTabActivated(tab.dataset.tab);
+        onTabActivated(navBtn.dataset.tab);
     });
 });
 
@@ -158,20 +172,17 @@ function onTabActivated(tab) {
 }
 
 // === Chat ===
-let chatViewMode = 'conversation'; // 'conversation' or 'activity'
+let chatViewMode = 'conversation';
 
 async function loadChat() {
     const container = document.getElementById('chat-container');
     container.innerHTML = '';
 
-    // Try loading real chat messages first
     try {
         const data = await api('/chat/messages');
         if (data.success && data.messages && data.messages.length > 0) {
             chatViewMode = 'conversation';
-            // Add toggle button
             addChatViewToggle(container);
-            // Render messages
             for (const msg of data.messages) {
                 appendChatMessage(msg, false);
             }
@@ -180,7 +191,6 @@ async function loadChat() {
         }
     } catch { /* fall through */ }
 
-    // Fallback to activity feed
     chatViewMode = 'activity';
     seenActivityIds.clear();
 
@@ -203,10 +213,10 @@ async function loadChat() {
 
 function addChatViewToggle(container) {
     const toggle = document.createElement('div');
-    toggle.className = 'chat-view-toggle';
+    toggle.className = 'segment-control';
     toggle.innerHTML = `
-        <button class="toggle-btn ${chatViewMode === 'conversation' ? 'active' : ''}" onclick="switchChatView('conversation')">💬 Chat</button>
-        <button class="toggle-btn ${chatViewMode === 'activity' ? 'active' : ''}" onclick="switchChatView('activity')">📊 Activity</button>
+        <button class="segment ${chatViewMode === 'conversation' ? 'active' : ''}" onclick="switchChatView('conversation')">Conversation</button>
+        <button class="segment ${chatViewMode === 'activity' ? 'active' : ''}" onclick="switchChatView('activity')">Activity</button>
     `;
     container.appendChild(toggle);
 }
@@ -236,8 +246,6 @@ async function switchChatView(mode) {
     container.scrollTop = container.scrollHeight;
 }
 
-const seenChatRequestIndices = new Set();
-
 function appendChatMessage(msg, scroll) {
     if (chatViewMode !== 'conversation') return;
     const container = document.getElementById('chat-container');
@@ -249,7 +257,7 @@ function appendChatMessage(msg, scroll) {
     if (msg.role === 'user') {
         div.innerHTML = `
             <div class="chat-msg-header">
-                <span class="chat-role">👤 You</span>
+                <span class="chat-role">${icon('user', 14)} You</span>
                 <span class="chat-time">${formatTime(msg.timestamp)}</span>
             </div>
             <div class="chat-msg-body">${escapeHtml(msg.text)}</div>
@@ -257,12 +265,14 @@ function appendChatMessage(msg, scroll) {
     } else {
         const bodyHtml = renderMarkdownLite(msg.text);
         const tokenInfo = msg.tokens
-            ? `<span class="chat-tokens">${msg.tokens.prompt || 0}→${msg.tokens.output || 0} tokens</span>`
+            ? `<span class="chat-tokens">${msg.tokens.prompt || 0} → ${msg.tokens.output || 0} tok</span>`
             : '';
-        const status = msg.completed ? '✅' : '⏳';
+        const statusClass = msg.completed ? 'done' : 'pending';
+        const statusText = msg.completed ? 'Done' : 'Thinking...';
         div.innerHTML = `
             <div class="chat-msg-header">
-                <span class="chat-role">🤖 Copilot ${status}</span>
+                <span class="chat-role">${icon('bot', 14)} Copilot</span>
+                <span class="chat-status ${statusClass}">${statusText}</span>
                 ${tokenInfo}
                 <span class="chat-time">${formatTime(msg.timestamp)}</span>
             </div>
@@ -271,34 +281,34 @@ function appendChatMessage(msg, scroll) {
     }
 
     container.appendChild(div);
-    while (container.children.length > 200) { container.removeChild(container.firstChild); }
+    while (container.children.length > 200) container.removeChild(container.firstChild);
     if (scroll) container.scrollTop = container.scrollHeight;
 }
 
 function updateChatMessage(msg) {
     if (chatViewMode !== 'conversation') return;
     const container = document.getElementById('chat-container');
-    // Find existing message for this request index and role
     const existing = container.querySelector(
         `.chat-msg-${msg.role}[data-request-index="${msg.requestIndex}"]`
     );
     if (existing) {
-        // Update in-place
         if (msg.role === 'assistant') {
             const body = existing.querySelector('.chat-msg-body');
             if (body) body.innerHTML = renderMarkdownLite(msg.text);
-            const status = existing.querySelector('.chat-role');
-            if (status) status.textContent = `🤖 Copilot ${msg.completed ? '✅' : '⏳'}`;
+            const status = existing.querySelector('.chat-status');
+            if (status) {
+                status.className = `chat-status ${msg.completed ? 'done' : 'pending'}`;
+                status.textContent = msg.completed ? 'Done' : 'Thinking...';
+            }
             if (msg.tokens) {
                 let tokenEl = existing.querySelector('.chat-tokens');
                 if (tokenEl) {
-                    tokenEl.textContent = `${msg.tokens.prompt || 0}→${msg.tokens.output || 0} tokens`;
+                    tokenEl.textContent = `${msg.tokens.prompt || 0} → ${msg.tokens.output || 0} tok`;
                 }
             }
         }
         container.scrollTop = container.scrollHeight;
     } else {
-        // New message not seen yet
         appendChatMessage(msg, true);
     }
 }
@@ -313,7 +323,7 @@ function renderMarkdownLite(md) {
     if (!md) return '';
     let html = escapeHtml(md);
 
-    // Code blocks: ```lang\ncode\n```
+    // Code blocks
     html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
         return `<pre class="chat-code"><code>${code.trim()}</code></pre>`;
     });
@@ -329,7 +339,7 @@ function renderMarkdownLite(md) {
     html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
     // Line breaks
     html = html.replace(/\n/g, '<br>');
-    // Bullet lists (simple)
+    // Bullet lists
     html = html.replace(/^- (.+)/gm, '• $1');
 
     return html;
@@ -340,7 +350,6 @@ async function sendPrompt() {
     const prompt = input.value.trim();
     if (!prompt) return;
     input.value = '';
-    // Show in activity feed immediately
     appendActivityEntry({
         id: Date.now(), time: Date.now(), type: 'prompt',
         text: `Prompt: ${prompt.substring(0, 100)}`,
@@ -352,8 +361,7 @@ async function sendPrompt() {
 }
 
 async function sendAction(action, btnEl) {
-    // btnEl may be passed explicitly; fall back to finding the button
-    const btn = btnEl || document.querySelector(action === 'accept' ? '.btn-accept' : '.btn-reject');
+    const btn = btnEl || document.querySelector(action === 'accept' ? '.qa-accept' : '.qa-reject');
     if (btn) btn.style.opacity = '0.5';
     try {
         const data = await api('/chat/action', {
@@ -361,13 +369,13 @@ async function sendAction(action, btnEl) {
             body: JSON.stringify({ action }),
         });
         if (data.success) {
-            if (btn) { btn.style.background = '#238636'; setTimeout(() => { btn.style.background = ''; }, 800); }
+            showToast(action === 'accept' ? 'Accepted' : 'Rejected');
         }
     } catch (e) { console.error('sendAction error', e); }
     setTimeout(() => { if (btn) btn.style.opacity = '1'; }, 500);
 }
 
-// Submit prompt on Enter (Shift+Enter for newline)
+// Prompt on Enter (Shift+Enter for newline)
 document.getElementById('prompt-input')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -384,27 +392,30 @@ async function navigateFiles(dirPath) {
     // Update breadcrumb
     const breadcrumb = document.getElementById('file-breadcrumb');
     const parts = dirPath ? dirPath.split('/') : [];
-    let html = '<button onclick="navigateFiles(\'\')" class="crumb">🏠 root</button>';
+    let html = `<button onclick="navigateFiles('')" class="crumb">${icon('home', 14)}<span>root</span></button>`;
     let accumulated = '';
     for (const part of parts) {
         accumulated += (accumulated ? '/' : '') + part;
         const path = accumulated;
-        html += `<button onclick="navigateFiles('${path}')" class="crumb">${part}</button>`;
+        html += `<button onclick="navigateFiles('${path}')" class="crumb">${icon('chevron', 10)}<span>${part}</span></button>`;
     }
     breadcrumb.innerHTML = html;
 
     // Render files
     if (data.items) {
-        list.innerHTML = data.items.map(item => `
-            <div class="file-item" onclick="${
-                item.type === 'directory'
-                    ? `navigateFiles('${item.path}')`
-                    : `viewFile('${item.path}')`
-            }">
-                <span class="icon">${item.type === 'directory' ? '📁' : '📄'}</span>
-                <span>${item.name}</span>
-            </div>
-        `).join('');
+        list.innerHTML = data.items.map(item => {
+            const isDir = item.type === 'directory';
+            const clickAction = isDir
+                ? `navigateFiles('${item.path}')`
+                : `viewFile('${item.path}')`;
+            return `
+                <div class="file-item" onclick="${clickAction}">
+                    ${icon(isDir ? 'folder' : 'file')}
+                    <span class="file-name">${item.name}</span>
+                    ${isDir ? `<span class="file-arrow">${icon('chevron', 14)}</span>` : ''}
+                </div>
+            `;
+        }).join('');
     } else {
         list.innerHTML = '<p class="placeholder">No files found</p>';
     }
@@ -441,7 +452,7 @@ async function executeCommand() {
     const command = input.value.trim();
     if (!command) return;
     input.value = '';
-    
+
     try {
         const data = await api('/terminal/execute', {
             method: 'POST',
@@ -452,7 +463,6 @@ async function executeCommand() {
             output.textContent += `Error: ${data.error || 'Failed to execute'}\n`;
             output.scrollTop = output.scrollHeight;
         }
-        // Output streams in via SSE 'terminal-output' events
     } catch (e) {
         const output = document.getElementById('terminal-output');
         output.textContent += `Error: ${e.message}\n`;
@@ -460,7 +470,6 @@ async function executeCommand() {
     }
 }
 
-// Wire up terminal input - retry binding in case DOM isn't ready at script load
 function bindTerminalInput() {
     const cmdInput = document.getElementById('cmd-input');
     if (cmdInput) {
@@ -473,7 +482,6 @@ function bindTerminalInput() {
     }
 }
 bindTerminalInput();
-// Retry once after DOM is fully loaded
 document.addEventListener('DOMContentLoaded', bindTerminalInput);
 
 // === Usage ===
@@ -485,15 +493,15 @@ async function refreshUsage() {
     kpis.innerHTML = `
         <div class="kpi-card">
             <div class="kpi-value">${data.totalRequests || 0}</div>
-            <div class="kpi-label">Total Requests</div>
+            <div class="kpi-label">Requests</div>
         </div>
         <div class="kpi-card">
             <div class="kpi-value">${data.totalEstimatedCost || '$0.00'}</div>
-            <div class="kpi-label">Est. Cost (24h)</div>
+            <div class="kpi-label">Est. Cost</div>
         </div>
         <div class="kpi-card">
             <div class="kpi-value">${modelData.model || 'N/A'}</div>
-            <div class="kpi-label">Active Model</div>
+            <div class="kpi-label">Model</div>
         </div>
     `;
 
@@ -552,7 +560,7 @@ async function submitBug() {
     const stepsText = document.getElementById('bug-steps').value.trim();
     const reproSteps = stepsText ? stepsText.split('\n').filter(s => s.trim()) : [];
 
-    if (!title) { alert('Title required'); return; }
+    if (!title) return;
 
     await api('/bugs/report', {
         method: 'POST',
@@ -576,21 +584,20 @@ async function updateBug(id, status) {
 
 async function verifyBug(id) {
     const data = await api(`/bugs/${id}/verify`, { method: 'POST' });
-    if (data.fixVerified) {
-        alert('✅ Fix verified — tests pass!');
-    } else {
-        alert('❌ Fix not verified — tests failed.');
-    }
+    showToast(data.fixVerified ? 'Fix verified — tests pass' : 'Fix not verified — tests failed');
     loadBugs();
 }
 
 // === Screenshot ===
 async function captureScreenshot() {
     const img = document.getElementById('screenshot-img');
-    const btn = document.querySelector('#tab-screenshot .btn-primary');
+    const btn = document.getElementById('capture-btn');
     img.alt = 'Capturing...';
     img.src = '';
-    if (btn) { btn.textContent = '⏳ Capturing...'; btn.disabled = true; }
+    if (btn) {
+        btn.querySelector('span').textContent = 'Capturing...';
+        btn.disabled = true;
+    }
     try {
         const data = await api('/screenshot/capture');
         if (data.success && data.image) {
@@ -602,7 +609,10 @@ async function captureScreenshot() {
     } catch (e) {
         img.alt = 'Error: ' + e.message;
     }
-    if (btn) { btn.textContent = '📸 Capture'; btn.disabled = false; }
+    if (btn) {
+        btn.querySelector('span').textContent = 'Capture Screen';
+        btn.disabled = false;
+    }
 }
 
 // === Helpers ===
@@ -620,7 +630,6 @@ fetchIDEStatus();
 // === IDE Real-time Helpers ===
 function shortPath(fullPath) {
     if (!fullPath) return '';
-    // Show last 2 path segments
     const parts = fullPath.replace(/\\/g, '/').split('/');
     return parts.slice(-2).join('/');
 }
@@ -637,21 +646,19 @@ function updateDiagnostics(data) {
     const el = document.getElementById('ide-diagnostics');
     if (!el) return;
     if (data.errors > 0) {
-        el.textContent = `❌ ${data.errors} errors`;
-        el.className = 'ide-diag has-errors';
+        el.textContent = `${data.errors} errors`;
+        el.className = 'sf-meta has-errors';
     } else if (data.warnings > 0) {
-        el.textContent = `⚠️ ${data.warnings} warnings`;
-        el.className = 'ide-diag has-warnings';
+        el.textContent = `${data.warnings} warnings`;
+        el.className = 'sf-meta has-warnings';
     } else {
-        el.textContent = '✅ No issues';
-        el.className = 'ide-diag';
+        el.textContent = 'No issues';
+        el.className = 'sf-meta';
     }
 }
 
 function updateTerminalList(terminals) {
-    // If terminal tab is active, update it
     const list = terminals || [];
-    // Store for terminal tab reference
     window._ideTerminals = list;
 }
 
@@ -663,8 +670,8 @@ function applySnapshot(data) {
     }
     if (data.diagnostics) updateDiagnostics(data.diagnostics);
     if (data.terminals) updateTerminalList(data.terminals);
-    // Mark connected
     document.getElementById('status-dot')?.classList.add('connected');
+    document.getElementById('status-label').textContent = 'Connected';
 }
 
 let toastTimeout = null;
@@ -682,31 +689,27 @@ function showToast(msg) {
     toastTimeout = setTimeout(() => toast.classList.remove('show'), 2500);
 }
 
-const ACTIVITY_ICONS = {
-    'prompt': '💬', 'action': '⚡', 'file-edit': '✏️',
-    'file-save': '💾', 'error': '❌', 'info': '📄', 'terminal': '💻'
-};
 const seenActivityIds = new Set();
 
 function appendActivityEntry(entry, scroll = true) {
     if (seenActivityIds.has(entry.id)) return;
     seenActivityIds.add(entry.id);
     const container = document.getElementById('chat-container');
-    // Remove placeholder if present
-    const ph = container.querySelector('.placeholder');
+    const ph = container.querySelector('.empty-state') || container.querySelector('.placeholder');
     if (ph) ph.remove();
 
     const div = document.createElement('div');
     div.className = `activity-entry activity-${entry.type}`;
     const time = new Date(entry.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-    const icon = ACTIVITY_ICONS[entry.type] || '📌';
-    div.innerHTML = `<span class="activity-time">${time}</span> <span class="activity-icon">${icon}</span> <span class="activity-text">${escapeHtml(entry.text)}</span>`;
-    if (entry.detail) {
-        div.title = entry.detail;
-    }
+    const iconName = ACTIVITY_ICON_MAP[entry.type] || 'file';
+    div.innerHTML = `
+        <span class="activity-time">${time}</span>
+        <span class="activity-icon">${icon(iconName, 14)}</span>
+        <span class="activity-text">${escapeHtml(entry.text)}</span>
+    `;
+    if (entry.detail) div.title = entry.detail;
     container.appendChild(div);
-    // Cap displayed entries
-    while (container.children.length > 100) { container.removeChild(container.firstChild); }
+    while (container.children.length > 100) container.removeChild(container.firstChild);
     if (scroll) container.scrollTop = container.scrollHeight;
 }
 
@@ -715,7 +718,6 @@ async function fetchIDEStatus() {
         const data = await api('/ide/status');
         if (data.success) applySnapshot(data);
     } catch { /* ignore */ }
-    // Poll every 5s as fallback
     setInterval(async () => {
         try {
             const data = await api('/ide/status');

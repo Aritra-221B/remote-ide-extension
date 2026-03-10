@@ -5,102 +5,225 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>Remote Control</title>
+    <meta name="theme-color" content="#000000">
+    <title>Remote IDE</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div id="app" class="screen">
-        <header>
-            <span class="logo">📱 Remote Control</span>
-            <span id="status-dot" class="status-dot"></span>
+    <!-- SVG Icon Definitions -->
+    <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+        <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </symbol>
+        <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+        </symbol>
+        <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+        </symbol>
+        <symbol id="i-bar-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/>
+        </symbol>
+        <symbol id="i-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>
+        </symbol>
+        <symbol id="i-bug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 2l1.88 1.88M14.12 3.88 16 2M9 7.13v-1a3 3 0 1 1 6 0v1M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6M12 20v-9M6.53 9C4.6 8.8 3 7.1 3 5M6 13H2M3 21c0-2.1 1.7-3.9 3.8-4M20.97 5c0 2.1-1.6 3.8-3.5 4M22 13h-4M17.2 17c2.1.1 3.8 1.9 3.8 4"/>
+        </symbol>
+        <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+        </symbol>
+        <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </symbol>
+        <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </symbol>
+        <symbol id="i-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+        </symbol>
+        <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+        </symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"/>
+        </symbol>
+        <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+        </symbol>
+        <symbol id="i-bot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/>
+        </symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </symbol>
+        <symbol id="i-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </symbol>
+        <symbol id="i-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </symbol>
+    </svg>
+
+    <div id="app" class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <svg class="header-icon" width="18" height="18"><use href="#i-zap"/></svg>
+                <span class="header-title">Remote IDE</span>
+            </div>
+            <div class="header-right">
+                <div id="status-dot" class="status-dot">
+                    <span class="status-label" id="status-label">Offline</span>
+                    <span class="status-indicator"></span>
+                </div>
+            </div>
         </header>
 
-        <div class="quick-actions">
-            <button onclick="sendAction('accept', this)" class="btn-accept">✅ Accept</button>
-            <button onclick="sendAction('reject', this)" class="btn-reject">❌ Reject</button>
+        <!-- IDE Status Strip -->
+        <div id="ide-status-bar" class="status-strip">
+            <span id="ide-active-file" class="sf-file">No file open</span>
+            <span class="sf-sep"></span>
+            <span id="ide-cursor-pos" class="sf-meta"></span>
+            <span id="ide-diagnostics" class="sf-meta"></span>
         </div>
 
-        <div id="ide-status-bar" class="ide-status-bar">
-            <span id="ide-active-file" class="ide-file">No file open</span>
-            <span id="ide-cursor-pos" class="ide-cursor"></span>
-            <span id="ide-diagnostics" class="ide-diag"></span>
-        </div>
-
-        <nav class="tabs">
-            <button class="tab active" data-tab="chat">💬 Chat</button>
-            <button class="tab" data-tab="files">📂 Files</button>
-            <button class="tab" data-tab="terminal">💻 Term</button>
-            <button class="tab" data-tab="usage">📊 Usage</button>
-            <button class="tab" data-tab="bugs">🐛 Bugs</button>
-            <button class="tab" data-tab="screenshot">📸 Screen</button>
-        </nav>
-
-        <div class="tab-content">
-            <!-- Chat Tab -->
-            <div id="tab-chat" class="tab-panel active">
-                <div id="chat-container" class="chat-messages">
-                    <p class="placeholder">Connecting to IDE chat...</p>
+        <!-- Main Content Area -->
+        <main class="content">
+            <!-- Chat Panel -->
+            <div id="tab-chat" class="panel active">
+                <div id="chat-container" class="chat-container">
+                    <div class="empty-state">
+                        <svg width="32" height="32" class="empty-icon"><use href="#i-chat"/></svg>
+                        <p>Connecting to IDE...</p>
+                    </div>
                 </div>
-                <div class="chat-input-bar">
-                    <textarea id="prompt-input" placeholder="Type a prompt..." rows="2"></textarea>
-                    <button onclick="sendPrompt()" class="btn-send">▶</button>
+                <div class="input-bar">
+                    <textarea id="prompt-input" placeholder="Type a prompt..." rows="1"></textarea>
+                    <button onclick="sendPrompt()" class="btn-send" aria-label="Send">
+                        <svg width="18" height="18"><use href="#i-send"/></svg>
+                    </button>
                 </div>
             </div>
 
-            <!-- Files Tab -->
-            <div id="tab-files" class="tab-panel hidden">
+            <!-- Files Panel -->
+            <div id="tab-files" class="panel">
                 <div class="breadcrumb" id="file-breadcrumb">
-                    <button onclick="navigateFiles('')" class="crumb">🏠 root</button>
+                    <button onclick="navigateFiles('')" class="crumb">
+                        <svg width="14" height="14"><use href="#i-home"/></svg>
+                        <span>root</span>
+                    </button>
                 </div>
                 <div id="file-list" class="file-list"></div>
                 <div id="file-viewer" class="file-viewer hidden">
                     <div class="file-viewer-header">
                         <span id="file-viewer-name"></span>
-                        <button onclick="closeFileViewer()">✕</button>
+                        <button onclick="closeFileViewer()" class="btn-close" aria-label="Close">
+                            <svg width="18" height="18"><use href="#i-x"/></svg>
+                        </button>
                     </div>
                     <pre id="file-viewer-content"></pre>
                 </div>
             </div>
 
-            <!-- Terminal Tab -->
-            <div id="tab-terminal" class="tab-panel hidden">
-                <div id="terminal-output" class="terminal-output"></div>
-                <div class="terminal-input-bar">
+            <!-- Terminal Panel -->
+            <div id="tab-terminal" class="panel">
+                <div id="terminal-output" class="terminal-output"><span class="term-prompt">$</span> Ready for commands...\n</div>
+                <div class="input-bar">
                     <input id="cmd-input" type="text" placeholder="Enter command..." />
-                    <button onclick="executeCommand()" class="btn-send">▶</button>
+                    <button onclick="executeCommand()" class="btn-send" aria-label="Run">
+                        <svg width="18" height="18"><use href="#i-send"/></svg>
+                    </button>
                 </div>
             </div>
 
-            <!-- Usage Tab -->
-            <div id="tab-usage" class="tab-panel hidden">
-                <div class="kpi-row" id="usage-kpis"></div>
+            <!-- Usage Panel -->
+            <div id="tab-usage" class="panel">
+                <div class="kpi-grid" id="usage-kpis"></div>
                 <div id="usage-details" class="usage-details"></div>
-                <button onclick="refreshUsage()" class="btn-secondary">🔄 Refresh</button>
+                <button onclick="refreshUsage()" class="btn-outline">
+                    <svg width="15" height="15"><use href="#i-refresh"/></svg>
+                    <span>Refresh</span>
+                </button>
             </div>
 
-            <!-- Bugs Tab -->
-            <div id="tab-bugs" class="tab-panel hidden">
-                <button onclick="showNewBugForm()" class="btn-primary">🐛 Report Bug</button>
+            <!-- Bugs Panel -->
+            <div id="tab-bugs" class="panel">
+                <button onclick="showNewBugForm()" class="btn-outline" style="margin-bottom:12px">
+                    <svg width="15" height="15"><use href="#i-plus"/></svg>
+                    <span>Report Bug</span>
+                </button>
                 <div id="new-bug-form" class="bug-form hidden">
                     <input id="bug-title" type="text" placeholder="Bug title" />
                     <textarea id="bug-desc" placeholder="Description..." rows="3"></textarea>
                     <textarea id="bug-steps" placeholder="Repro steps (one per line)" rows="3"></textarea>
-                    <div class="form-actions">
+                    <div class="form-row">
                         <button onclick="submitBug()" class="btn-primary">Submit</button>
-                        <button onclick="hideNewBugForm()" class="btn-secondary">Cancel</button>
+                        <button onclick="hideNewBugForm()" class="btn-outline">Cancel</button>
                     </div>
                 </div>
                 <div id="bug-list" class="bug-list"></div>
             </div>
 
-            <!-- Screenshot Tab -->
-            <div id="tab-screenshot" class="tab-panel hidden">
-                <button onclick="captureScreenshot()" class="btn-primary">📸 Capture</button>
-                <div class="screenshot-container">
-                    <img id="screenshot-img" src="" alt="IDE Screenshot" />
+            <!-- Screenshot Panel -->
+            <div id="tab-screenshot" class="panel">
+                <div class="screenshot-area">
+                    <button onclick="captureScreenshot()" class="btn-capture" id="capture-btn">
+                        <svg width="20" height="20"><use href="#i-camera"/></svg>
+                        <span>Capture Screen</span>
+                    </button>
+                    <div class="screenshot-result">
+                        <img id="screenshot-img" src="" alt="No screenshot yet" />
+                    </div>
                 </div>
             </div>
+        </main>
+
+        <!-- Floating Quick Actions -->
+        <div class="quick-actions" id="quick-actions">
+            <button onclick="sendAction('accept', this)" class="qa-btn qa-accept" aria-label="Accept">
+                <svg width="18" height="18"><use href="#i-check"/></svg>
+                <span>Accept</span>
+            </button>
+            <button onclick="sendAction('reject', this)" class="qa-btn qa-reject" aria-label="Reject">
+                <svg width="18" height="18"><use href="#i-x"/></svg>
+                <span>Reject</span>
+            </button>
         </div>
+
+        <!-- Bottom Navigation -->
+        <nav class="bottom-nav" id="bottom-nav">
+            <button class="nav-item active" data-tab="chat" aria-label="Chat">
+                <svg width="20" height="20"><use href="#i-chat"/></svg>
+                <span>Chat</span>
+            </button>
+            <button class="nav-item" data-tab="files" aria-label="Files">
+                <svg width="20" height="20"><use href="#i-folder"/></svg>
+                <span>Files</span>
+            </button>
+            <button class="nav-item" data-tab="terminal" aria-label="Terminal">
+                <svg width="20" height="20"><use href="#i-terminal"/></svg>
+                <span>Terminal</span>
+            </button>
+            <button class="nav-item" data-tab="usage" aria-label="Stats">
+                <svg width="20" height="20"><use href="#i-bar-chart"/></svg>
+                <span>Stats</span>
+            </button>
+            <button class="nav-item" data-tab="bugs" aria-label="Bugs">
+                <svg width="20" height="20"><use href="#i-bug"/></svg>
+                <span>Bugs</span>
+            </button>
+            <button class="nav-item" data-tab="screenshot" aria-label="Screen">
+                <svg width="20" height="20"><use href="#i-camera"/></svg>
+                <span>Screen</span>
+            </button>
+        </nav>
     </div>
     <script src="app.js"></script>
 </body>
