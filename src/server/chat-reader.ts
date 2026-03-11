@@ -10,16 +10,49 @@ export interface ChatMessage {
     requestIndex: number;
     completed?: boolean;
     tokens?: { prompt?: number; output?: number };
+    model?: string;
+}
+
+export interface UsageSample {
+    timestamp: number;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
 }
 
 let chatSessionsDir = '';
 let activeSessionFile = '';
 let lastFileSize = 0;
 let cachedMessages: ChatMessage[] = [];
+let cachedUsageSamples: UsageSample[] = [];
 let pollInterval: ReturnType<typeof setInterval> | null = null;
+let fileWatcher: fs.FSWatcher | null = null;
+let watchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function getChatMessages(): ChatMessage[] {
     return cachedMessages;
+}
+
+export function getChatUsageSamples(): UsageSample[] {
+    return cachedUsageSamples;
+}
+
+/** Called externally (e.g. right after /chat/send) to check the JSONL immediately. */
+export function triggerImmediateCheck(): void {
+    selectActiveSession();
+    checkForUpdates();
+}
+
+/** Attach fs.watch to the active session file for near-instant detection. */
+function watchActiveFile(filepath: string): void {
+    if (fileWatcher) { fileWatcher.close(); fileWatcher = null; }
+    try {
+        fileWatcher = fs.watch(filepath, { persistent: false }, () => {
+            // Debounce: VS Code may fire multiple rapid writes during streaming.
+            if (watchDebounceTimer) { clearTimeout(watchDebounceTimer); }
+            watchDebounceTimer = setTimeout(() => { checkForUpdates(); }, 80);
+        });
+    } catch { /* fs.watch not available on all platforms — poll covers it */ }
 }
 
 export function initChatReader(context: vscode.ExtensionContext): void {
@@ -69,11 +102,11 @@ export function initChatReader(context: vscode.ExtensionContext): void {
     console.log(`[ChatReader] Using: ${chatSessionsDir}`);
     selectActiveSession();
 
-    // Poll every 3 seconds for changes (more reliable than fs.watch across platforms)
+    // 800 ms safety-net poll — catches anything fs.watch misses
     pollInterval = setInterval(() => {
         selectActiveSession();
         checkForUpdates();
-    }, 3000);
+    }, 800);
 }
 
 /** Pick the most recently modified JSONL file as the active session */
@@ -97,6 +130,7 @@ function selectActiveSession(): void {
             lastFileSize = 0;
             cachedMessages = [];
             console.log(`[ChatReader] Active session: ${path.basename(newest)}`);
+            watchActiveFile(newest);
             checkForUpdates();
         }
     } catch { /* ignore */ }
@@ -142,6 +176,7 @@ function parseSession(content: string): ChatMessage[] {
         timestamp: number;
         completed: boolean;
         tokens?: { prompt?: number; output?: number };
+        model?: string;
     }> = new Map();
 
     let nextIndex = 0;
@@ -196,6 +231,13 @@ function parseSession(content: string): ChatMessage[] {
                     prompt: v.metadata.promptTokens,
                     output: v.metadata.outputTokens,
                 };
+                if (v.metadata.modelId) {
+                    entry.model = v.metadata.modelId;
+                }
+            }
+
+            if (field === 'model' && typeof v === 'string') {
+                entry.model = v;
             }
 
             if (field === 'message' && v?.text) {
@@ -225,16 +267,30 @@ function parseSession(content: string): ChatMessage[] {
                 requestIndex: idx,
                 completed: req.completed,
                 tokens: req.tokens,
+                model: req.model,
             });
         }
     }
+
+    // Build usage samples from completed requests that have token data
+    const samples: UsageSample[] = [];
+    for (const [, req] of sorted) {
+        if (req.completed && req.tokens?.prompt !== undefined && req.tokens?.output !== undefined) {
+            samples.push({
+                timestamp: req.timestamp,
+                model: req.model || 'copilot',
+                inputTokens: req.tokens.prompt ?? 0,
+                outputTokens: req.tokens.output ?? 0,
+            });
+        }
+    }
+    cachedUsageSamples = samples;
 
     return messages;
 }
 
 export function disposeChatReader(): void {
-    if (pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
-    }
+    if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+    if (fileWatcher) { fileWatcher.close(); fileWatcher = null; }
+    if (watchDebounceTimer) { clearTimeout(watchDebounceTimer); watchDebounceTimer = null; }
 }

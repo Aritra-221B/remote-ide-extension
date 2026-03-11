@@ -63,11 +63,29 @@ export class TunnelManager {
 
         fs.mkdirSync(binDir, { recursive: true });
         const downloadUrl = this.getDownloadUrl();
+        const isTgz = downloadUrl.endsWith('.tgz');
+        const downloadDest = isTgz ? binPath + '.tgz' : binPath;
 
         await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification, title: 'Downloading cloudflared...' },
-            () => this.downloadFile(downloadUrl, binPath)
+            () => this.downloadFile(downloadUrl, downloadDest)
         );
+
+        if (isTgz) {
+            // Extract the binary from the .tgz archive, then remove the archive
+            await new Promise<void>((resolve, reject) => {
+                cp.execFile('tar', ['-xzf', downloadDest, '-C', binDir], (err) => {
+                    try { fs.unlinkSync(downloadDest); } catch { /* ignore */ }
+                    if (err) { reject(err); } else { resolve(); }
+                });
+            });
+            // cloudflared tarballs contain a single binary; rename if needed
+            const extracted = fs.readdirSync(binDir)
+                .find(f => f.startsWith('cloudflared') && !f.endsWith('.tgz'));
+            if (extracted && extracted !== binName) {
+                fs.renameSync(path.join(binDir, extracted), binPath);
+            }
+        }
 
         if (process.platform !== 'win32') {
             fs.chmodSync(binPath, '755');
@@ -107,7 +125,10 @@ export class TunnelManager {
                     response.pipe(file);
                     file.on('finish', () => { file.close(); resolve(); });
                 }).on('error', (err) => {
-                    fs.unlinkSync(dest);
+                    // Close the stream before attempting to delete the file;
+                    // on Windows an open handle prevents unlinkSync (EBUSY).
+                    file.destroy();
+                    try { fs.unlinkSync(dest); } catch { /* ignore if file doesn't exist */ }
                     reject(err);
                 });
             };

@@ -5,10 +5,15 @@ import { CDPClient } from '../cdp';
 const cdp = new CDPClient();
 let cdpAvailable = false;
 
+async function tryConnectCDP(): Promise<void> {
+    if (cdpAvailable) { return; }
+    try { cdpAvailable = await cdp.connect(); } catch { cdpAvailable = false; }
+}
+
 export function promptRoutes() {
     const router = Router();
 
-    cdp.connect().then(ok => { cdpAvailable = ok; }).catch(() => {});
+    tryConnectCDP().catch(() => {});
 
     router.post('/send', async (req, res) => {
         const { prompt } = req.body;
@@ -16,6 +21,8 @@ export function promptRoutes() {
             res.status(400).json({ success: false, error: 'Missing prompt' });
             return;
         }
+
+        await tryConnectCDP();
 
         if (cdpAvailable) {
             const success = await cdp.sendPrompt(prompt);

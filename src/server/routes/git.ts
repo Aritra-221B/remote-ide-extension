@@ -62,17 +62,17 @@ export function gitRoutes() {
         }
 
         // Sanitize commit message: remove shell-dangerous characters
-        const sanitized = message.replace(/[`$\\";|&<>]/g, '').trim();
-        if (!sanitized) {
+        const trimmed = message.trim();
+        if (!trimmed) {
             res.status(400).json({ success: false, error: 'Invalid commit message' });
             return;
         }
 
         try {
             git('add -A', cwd);
-            // Use -- to prevent message from being interpreted as args
-            const result = cp.execSync(
-                `git commit -m "${sanitized}"`,
+            // Use execFileSync with args array — no shell, immune to injection
+            const result = cp.execFileSync(
+                'git', ['commit', '-m', trimmed],
                 { cwd, encoding: 'utf-8', timeout: 15000 }
             ).trim();
             res.json({ success: true, result });

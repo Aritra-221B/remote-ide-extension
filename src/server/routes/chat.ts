@@ -3,11 +3,19 @@ import * as vscode from 'vscode';
 import { CDPClient } from '../cdp';
 import { sseManager } from '../sse';
 import { addActivity, getRecentActivity } from '../activity';
-import { getChatMessages } from '../chat-reader';
+import { getChatMessages, triggerImmediateCheck } from '../chat-reader';
 import { markPromptSent, markReviewed, isPendingReview } from '../edit-state';
 
 const cdp = new CDPClient();
 let cdpAvailable = false;
+let chatPollInterval: ReturnType<typeof setInterval> | null = null;
+
+export function stopChatPolling() {
+    if (chatPollInterval) {
+        clearInterval(chatPollInterval);
+        chatPollInterval = null;
+    }
+}
 
 async function tryConnectCDP() {
     if (cdpAvailable) { return true; }
@@ -23,7 +31,8 @@ export function chatRoutes(context: vscode.ExtensionContext) {
 
     // Poll chat HTML and broadcast via SSE (only if CDP connected)
     let lastChatHTML = '';
-    setInterval(async () => {
+    stopChatPolling(); // clear any previous interval before creating a new one
+    chatPollInterval = setInterval(async () => {
         if (!cdpAvailable) { return; }
         try {
             const html = await cdp.getChatHTML();
@@ -61,6 +70,10 @@ export function chatRoutes(context: vscode.ExtensionContext) {
             addActivity('prompt', `Prompt: ${prompt.substring(0, 100)}`);
             markPromptSent();
             res.json({ success });
+            // Kick off an immediate JSONL check so the SSE fires as soon
+            // as VS Code writes the first response chunk (don't wait for poll).
+            setTimeout(() => triggerImmediateCheck(), 300);
+            setTimeout(() => triggerImmediateCheck(), 800);
             return;
         }
 
@@ -69,9 +82,18 @@ export function chatRoutes(context: vscode.ExtensionContext) {
             addActivity('prompt', `Prompt: ${prompt.substring(0, 100)}`);
             markPromptSent();
             res.json({ success: true, method: 'vscode-command' });
+            setTimeout(() => triggerImmediateCheck(), 300);
+            setTimeout(() => triggerImmediateCheck(), 800);
         } catch {
             res.json({ success: false, error: 'Failed to send prompt' });
         }
+    });
+
+    // POST /api/chat/poll — client calls this to force an immediate JSONL check.
+    // Used during the burst-poll phase right after a prompt is sent.
+    router.post('/poll', (req, res) => {
+        triggerImmediateCheck();
+        res.json({ success: true, messages: getChatMessages() });
     });
 
     router.post('/action', async (req, res) => {

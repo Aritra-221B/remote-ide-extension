@@ -4,7 +4,7 @@ import * as http from 'http';
 import { v4 as uuidv4 } from 'uuid';
 import * as vscode from 'vscode';
 import { authMiddleware } from './middleware';
-import { chatRoutes } from './routes/chat';
+import { chatRoutes, stopChatPolling } from './routes/chat';
 import { terminalRoutes } from './routes/terminal';
 import { fileRoutes } from './routes/files';
 import { gitRoutes } from './routes/git';
@@ -76,6 +76,7 @@ export class RemoteServer {
     }
 
     async stop() {
+        stopChatPolling();
         sseManager.closeAll();
         this.httpServer?.close();
         this.isRunning = false;

@@ -35,10 +35,15 @@ function connectSSE() {
     eventSource = new EventSource(url);
 
     eventSource.addEventListener('connected', () => {
+        const wasConnected = sseConnected;
         sseConnected = true;
         const dot = document.getElementById('status-dot');
         dot.classList.add('connected');
         document.getElementById('status-label').textContent = 'Connected';
+        // Re-hydrate chat after a reconnect — messages may have arrived while offline
+        if (wasConnected && isActiveTab('chat')) {
+            loadChat();
+        }
     });
 
     eventSource.addEventListener('chat-update', (e) => {
@@ -55,11 +60,26 @@ function connectSSE() {
 
     eventSource.addEventListener('chat-message', (e) => {
         const msg = JSON.parse(e.data);
+        // BUG FIX: if we were in activity mode (no prior messages), switch to
+        // conversation mode automatically so the incoming message is visible.
+        if (chatViewMode !== 'conversation') {
+            switchToConversationMode();
+        }
+        removeThinkingIndicator();
         appendChatMessage(msg, true);
+        // Stop burst polling once a completed response arrives
+        if (msg.role === 'assistant' && msg.completed) stopResponsePoll();
     });
 
     eventSource.addEventListener('chat-message-update', (e) => {
         const msg = JSON.parse(e.data);
+        if (chatViewMode !== 'conversation') {
+            switchToConversationMode();
+        }
+        if (msg.role === 'assistant' && msg.completed) {
+            removeThinkingIndicator();
+            stopResponsePoll();
+        }
         updateChatMessage(msg);
     });
 
@@ -181,6 +201,66 @@ function onTabActivated(tab) {
 
 // === Chat ===
 let chatViewMode = 'conversation';
+
+/** Returns true if the given tab panel is currently visible. */
+function isActiveTab(tabName) {
+    return document.getElementById(`tab-${tabName}`)?.classList.contains('active');
+}
+
+/**
+ * Switches the chat container to conversation mode without a full reload.
+ * Called when an SSE message arrives while we’re in activity mode.
+ */
+function switchToConversationMode() {
+    chatViewMode = 'conversation';
+    const container = document.getElementById('chat-container');
+    container.innerHTML = '';
+    addChatViewToggle(container);
+}
+
+// === Burst polling after a prompt is sent ===
+// Calls POST /chat/poll every 800 ms to force the server to check the JSONL
+// immediately, rather than waiting for the background timer.
+let responsePollTimer = null;
+let responsePollCount = 0;
+const RESPONSE_POLL_MAX = 38; // 38 × 800ms ≈ 30 s
+
+function startResponsePoll() {
+    stopResponsePoll();
+    responsePollCount = 0;
+    responsePollTimer = setInterval(async () => {
+        responsePollCount++;
+        if (responsePollCount > RESPONSE_POLL_MAX) { stopResponsePoll(); return; }
+        try { await api('/chat/poll', { method: 'POST' }); } catch { /* ignore */ }
+    }, 800);
+}
+
+function stopResponsePoll() {
+    if (responsePollTimer) { clearInterval(responsePollTimer); responsePollTimer = null; }
+}
+
+// "Thinking…" placeholder while waiting for the first assistant token
+const THINKING_ID = '__thinking_indicator__';
+function showThinkingIndicator() {
+    removeThinkingIndicator();
+    if (chatViewMode !== 'conversation') return;
+    const container = document.getElementById('chat-container');
+    const div = document.createElement('div');
+    div.id = THINKING_ID;
+    div.className = 'chat-msg chat-msg-assistant thinking';
+    div.innerHTML = `
+        <div class="chat-msg-header">
+            <span class="chat-role">${icon('bot', 14)} Copilot</span>
+            <span class="chat-status pending">Thinking…</span>
+        </div>
+        <div class="chat-msg-body thinking-dots"><span></span><span></span><span></span></div>
+    `;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+function removeThinkingIndicator() {
+    document.getElementById(THINKING_ID)?.remove();
+}
 
 async function loadChat() {
     const container = document.getElementById('chat-container');
@@ -359,14 +439,29 @@ async function sendPrompt() {
     if (!prompt) return;
     input.value = '';
     promptPending = true;
-    appendActivityEntry({
-        id: Date.now(), time: Date.now(), type: 'prompt',
-        text: `Prompt: ${prompt.substring(0, 100)}`,
-    });
+
+    // Switch to conversation mode immediately so the user sees their own message
+    if (chatViewMode !== 'conversation') {
+        switchToConversationMode();
+    }
+
+    // Optimistic: show the user’s own message instantly
+    const optimisticMsg = {
+        role: 'user', text: prompt,
+        timestamp: Date.now(), requestIndex: -1, completed: true,
+    };
+    appendChatMessage(optimisticMsg, true);
+
+    // Show a "Thinking…" placeholder right away
+    showThinkingIndicator();
+
     await api('/chat/send', {
         method: 'POST',
         body: JSON.stringify({ prompt }),
     });
+
+    // Start burst polling so the server checks the JSONL file every 800 ms
+    startResponsePoll();
 }
 
 async function sendAction(action, btnEl) {
@@ -412,8 +507,8 @@ async function navigateFiles(dirPath) {
     let accumulated = '';
     for (const part of parts) {
         accumulated += (accumulated ? '/' : '') + part;
-        const path = accumulated;
-        html += `<button onclick="navigateFiles('${path}')" class="crumb">${icon('chevron', 10)}<span>${part}</span></button>`;
+        const safePath = accumulated.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        html += `<button onclick="navigateFiles('${safePath}')" class="crumb">${icon('chevron', 10)}<span>${escapeHtml(part)}</span></button>`;
     }
     breadcrumb.innerHTML = html;
 
@@ -421,13 +516,14 @@ async function navigateFiles(dirPath) {
     if (data.items) {
         list.innerHTML = data.items.map(item => {
             const isDir = item.type === 'directory';
+            const safePath = item.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
             const clickAction = isDir
-                ? `navigateFiles('${item.path}')`
-                : `viewFile('${item.path}')`;
+                ? `navigateFiles('${safePath}')`
+                : `viewFile('${safePath}')`;
             return `
                 <div class="file-item" onclick="${clickAction}">
                     ${icon(isDir ? 'folder' : 'file')}
-                    <span class="file-name">${item.name}</span>
+                    <span class="file-name">${escapeHtml(item.name)}</span>
                     ${isDir ? `<span class="file-arrow">${icon('chevron', 14)}</span>` : ''}
                 </div>
             `;
@@ -502,39 +598,101 @@ document.addEventListener('DOMContentLoaded', bindTerminalInput);
 
 // === Usage ===
 async function refreshUsage() {
-    const data = await api('/usage/summary');
-    const modelData = await api('/usage/current-model');
+    const [breakdown, modelData] = await Promise.all([
+        api('/usage/ide-breakdown'),
+        api('/usage/current-model'),
+    ]);
+
+    const ides = breakdown.ides || [];
+
+    // ── Top-level KPI row: totals across all detected IDEs ──────────────────
+    const detectedIdes  = ides.filter(i => i.detected);
+    const grandRequests = detectedIdes.reduce((s, i) => s + i.totalRequests, 0);
+    const grandIn       = detectedIdes.reduce((s, i) => s + i.totalInputTokens, 0);
+    const grandOut      = detectedIdes.reduce((s, i) => s + i.totalOutputTokens, 0);
+    const grandCost     = detectedIdes.reduce((s, i) => s + parseFloat((i.totalEstimatedCost || '$0').replace('$', '')), 0);
 
     const kpis = document.getElementById('usage-kpis');
     kpis.innerHTML = `
         <div class="kpi-card">
-            <div class="kpi-value">${data.totalRequests || 0}</div>
-            <div class="kpi-label">Requests</div>
+            <div class="kpi-value">${grandRequests.toLocaleString()}</div>
+            <div class="kpi-label">Total Requests</div>
         </div>
         <div class="kpi-card">
-            <div class="kpi-value">${data.totalEstimatedCost || '$0.00'}</div>
+            <div class="kpi-value">${grandIn.toLocaleString()}</div>
+            <div class="kpi-label">Input Tokens</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-value">${grandOut.toLocaleString()}</div>
+            <div class="kpi-label">Output Tokens</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-value">$${grandCost.toFixed(4)}</div>
             <div class="kpi-label">Est. Cost</div>
         </div>
         <div class="kpi-card">
-            <div class="kpi-value">${modelData.model || 'N/A'}</div>
-            <div class="kpi-label">Model</div>
+            <div class="kpi-value" style="font-size:0.72em;word-break:break-all;line-height:1.2">${modelData.model || 'N/A'}</div>
+            <div class="kpi-label">Active Model</div>
         </div>
     `;
 
-    const details = document.getElementById('usage-details');
-    if (data.byModel && Object.keys(data.byModel).length > 0) {
-        details.innerHTML = Object.entries(data.byModel).map(([name, m]) => `
-            <div class="usage-model">
-                <div class="usage-model-name">${name}</div>
-                <div class="usage-model-stat">Requests: ${m.requests}</div>
-                <div class="usage-model-stat">Input tokens: ${m.inputTokens.toLocaleString()}</div>
-                <div class="usage-model-stat">Output tokens: ${m.outputTokens.toLocaleString()}</div>
-                <div class="usage-model-stat">Cost: $${m.estimatedCost.toFixed(4)}</div>
+    // ── Per-IDE breakdown cards ──────────────────────────────────────────────
+    const container = document.getElementById('ide-breakdown');
+    container.innerHTML = ides.map(ide => {
+        if (!ide.detected) {
+            return `
+            <div class="ide-card ide-card--undetected">
+                <div class="ide-card-header">
+                    <span class="ide-dot" style="background:${ide.color}"></span>
+                    <span class="ide-card-name">${ide.displayName}</span>
+                    <span class="ide-badge ide-badge--off">Not detected</span>
+                </div>
+            </div>`;
+        }
+
+        if (ide.totalRequests === 0) {
+            return `
+            <div class="ide-card">
+                <div class="ide-card-header">
+                    <span class="ide-dot" style="background:${ide.color}"></span>
+                    <span class="ide-card-name">${ide.displayName}</span>
+                    <span class="ide-badge">No usage data</span>
+                </div>
+            </div>`;
+        }
+
+        const topIdx = ide.models.findIndex(m => m.name === ide.topModel);
+        const modelRows = ide.models.map((m, i) => `
+            <div class="ide-model-row${i === 0 ? ' ide-model-row--top' : ''}">
+                <div class="ide-model-bar-wrap">
+                    <div class="ide-model-bar" style="width:${Math.round((m.requests / ide.models[0].requests) * 100)}%;background:${ide.color}88"></div>
+                </div>
+                <div class="ide-model-info">
+                    <span class="ide-model-name">${m.name}${i === 0 ? ' <span class="ide-top-badge">TOP</span>' : ''}</span>
+                    <span class="ide-model-reqs">${m.requests} req${m.requests !== 1 ? 's' : ''}</span>
+                </div>
+                <div class="ide-model-tokens">
+                    <span>${m.inputTokens.toLocaleString()} in</span>
+                    <span>${m.outputTokens.toLocaleString()} out</span>
+                    <span class="ide-model-cost">$${m.estimatedCost.toFixed(4)}</span>
+                </div>
             </div>
         `).join('');
-    } else {
-        details.innerHTML = '<p class="placeholder">No usage data yet</p>';
-    }
+
+        return `
+        <div class="ide-card" style="--ide-color:${ide.color}">
+            <div class="ide-card-header">
+                <span class="ide-dot" style="background:${ide.color}"></span>
+                <span class="ide-card-name">${ide.displayName}</span>
+                <span class="ide-card-meta">${ide.totalRequests} requests · ${ide.totalEstimatedCost}</span>
+            </div>
+            <div class="ide-card-stats">
+                <span>${ide.totalInputTokens.toLocaleString()} in</span>
+                <span>${ide.totalOutputTokens.toLocaleString()} out</span>
+            </div>
+            <div class="ide-models">${modelRows}</div>
+        </div>`;
+    }).join('');
 }
 
 // === Bugs ===

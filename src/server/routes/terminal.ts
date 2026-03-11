@@ -27,7 +27,11 @@ function ensureShell(cwd: string): cp.ChildProcess {
         return persistentShell;
     }
 
-    persistentShell = cp.spawn('cmd.exe', ['/Q'], {
+    const isWin = process.platform === 'win32';
+    const shellCmd = isWin ? 'cmd.exe' : 'sh';
+    const shellArgs = isWin ? ['/Q'] : [];
+
+    persistentShell = cp.spawn(shellCmd, shellArgs, {
         cwd,
         env: { ...process.env },
         windowsHide: true,
@@ -36,8 +40,10 @@ function ensureShell(cwd: string): cp.ChildProcess {
 
     persistentShell.stdout?.on('data', (chunk: Buffer) => {
         const text = chunk.toString();
-        // Filter out bare prompt lines (e.g. "C:\Users\...>") to reduce noise
-        const cleaned = text.replace(/^[A-Z]:\\[^>\n]*>\s*$/gm, '').trim();
+        // Filter out shell prompt lines to reduce noise
+        const cleaned = isWin
+            ? text.replace(/^[A-Z]:\\[^>\n]*>\s*$/gm, '').trim()
+            : text.replace(/^\$\s*$/gm, '').trim();
         if (cleaned) { appendOutput(cleaned + '\n'); }
     });
 
@@ -79,7 +85,11 @@ export function terminalRoutes() {
 
         try {
             const shell = ensureShell(cwd);
-            shell.stdin?.write(command + '\r\n');
+            const ok = shell.stdin?.write(command + '\r\n') ?? false;
+            if (!ok && shell.stdin) {
+                // Buffer is full; data is queued — resume after drain
+                shell.stdin.once('drain', () => { /* buffer drained */ });
+            }
             res.json({ success: true });
         } catch (err: any) {
             appendOutput(`Error: ${err.message}\n`);

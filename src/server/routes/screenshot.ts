@@ -7,6 +7,11 @@ import * as os from 'os';
 const cdp = new CDPClient();
 let cdpAvailable = false;
 
+async function tryConnectCDP(): Promise<void> {
+    if (cdpAvailable) { return; }
+    try { cdpAvailable = await cdp.connect(); } catch { cdpAvailable = false; }
+}
+
 /** Capture screen using screenshot-desktop (native Windows capture) */
 async function nativeScreenshot(): Promise<string | null> {
     try {
@@ -22,10 +27,11 @@ async function nativeScreenshot(): Promise<string | null> {
 export function screenshotRoutes() {
     const router = Router();
 
-    cdp.connect().then(ok => { cdpAvailable = ok; }).catch(() => {});
+    tryConnectCDP().catch(() => {});
 
     router.get('/capture', async (req, res) => {
         // Try CDP first (captures VS Code window only)
+        await tryConnectCDP();
         if (cdpAvailable) {
             const data = await cdp.takeScreenshot();
             if (data) {
