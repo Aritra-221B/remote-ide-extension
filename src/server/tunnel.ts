@@ -23,9 +23,11 @@ export class TunnelManager {
 
             this.process = cp.spawn(binaryPath, args);
 
+            let outputBuffer = '';
+
             this.process.stderr?.on('data', (data: Buffer) => {
-                const output = data.toString();
-                const match = output.match(/https:\/\/[^\s]+\.trycloudflare\.com/);
+                outputBuffer += data.toString();
+                const match = outputBuffer.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
                 if (match && !this.publicUrl) {
                     this.publicUrl = match[0];
                     resolve(this.publicUrl);

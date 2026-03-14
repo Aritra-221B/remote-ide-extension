@@ -118,6 +118,19 @@ body {
 .header-right {
     display: flex;
     align-items: center;
+    gap: 10px;
+}
+
+.ide-name-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--ide-accent, var(--accent)) 15%, transparent);
+    color: var(--ide-accent, var(--accent));
+    border: 1px solid color-mix(in srgb, var(--ide-accent, var(--accent)) 25%, transparent);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
 }
 
 .status-dot {
@@ -642,6 +655,23 @@ body {
 .input-bar input {
     font-family: var(--font-mono);
     font-size: 13px;
+}
+
+.model-select {
+    width: 100%;
+    background: transparent;
+    color: var(--text);
+    border: none;
+    outline: none;
+    font-size: inherit;
+    font-family: inherit;
+    padding: 0;
+    cursor: pointer;
+}
+
+.model-select option {
+    background: var(--bg-surface);
+    color: var(--text);
 }
 
 .btn-send {

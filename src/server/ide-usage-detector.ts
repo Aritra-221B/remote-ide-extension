@@ -2,8 +2,8 @@
  * IDE Usage Detector
  *
  * Scans the local file system for VS Code, Cursor, and Antigravity workspace
- * storage directories, parses every Copilot-style chatSessions JSONL found,
- * and returns per-IDE, per-model usage aggregates.
+ * storage directories, parses every chat session file found using each IDE's
+ * platform provider, and returns per-IDE, per-model usage aggregates.
  *
  * Results are cached for 60 seconds so repeated dashboard refreshes don't
  * hammer the disk.
@@ -11,7 +11,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
+import { getAllProviders } from './platform';
+import type { IDEPlatformProvider, ParsedChatRequest } from './platform';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,64 +33,7 @@ export interface IDEUsageResult {
     totalOutputTokens: number;
 }
 
-// ─── IDE storage path catalogue ───────────────────────────────────────────────
-
-const home = os.homedir();
-const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
-const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
-
-const IDE_CATALOGUE: Array<{
-    key: string;
-    displayName: string;
-    color: string;        // for the dashboard chip
-    storagePaths: string[];
-}> = [
-    {
-        key: 'vscode',
-        displayName: 'VS Code',
-        color: '#007ACC',
-        storagePaths: [
-            // Windows
-            path.join(appData, 'Code', 'User', 'workspaceStorage'),
-            path.join(localAppData, 'Programs', 'Microsoft VS Code', 'resources', 'app', 'extensions'),
-            // macOS
-            path.join(home, 'Library', 'Application Support', 'Code', 'User', 'workspaceStorage'),
-            // Linux
-            path.join(home, '.config', 'Code', 'User', 'workspaceStorage'),
-        ],
-    },
-    {
-        key: 'cursor',
-        displayName: 'Cursor',
-        color: '#6B4FBB',
-        storagePaths: [
-            // Windows
-            path.join(appData, 'Cursor', 'User', 'workspaceStorage'),
-            // macOS
-            path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'workspaceStorage'),
-            // Linux
-            path.join(home, '.config', 'Cursor', 'User', 'workspaceStorage'),
-        ],
-    },
-    {
-        key: 'antigravity',
-        displayName: 'Antigravity',
-        color: '#00BFA5',
-        storagePaths: [
-            // Windows
-            path.join(appData, 'Antigravity', 'User', 'workspaceStorage'),
-            path.join(appData, 'Antigravity', 'workspaceStorage'),
-            path.join(localAppData, 'Antigravity', 'User', 'workspaceStorage'),
-            // macOS
-            path.join(home, 'Library', 'Application Support', 'Antigravity', 'User', 'workspaceStorage'),
-            // Linux
-            path.join(home, '.config', 'Antigravity', 'User', 'workspaceStorage'),
-            path.join(home, '.antigravity', 'workspaceStorage'),
-        ],
-    },
-];
-
-// ─── JSONL parser ─────────────────────────────────────────────────────────────
+// ─── Storage scanner ──────────────────────────────────────────────────────────
 
 interface RawRequest {
     model: string;
@@ -98,72 +42,14 @@ interface RawRequest {
     completed: boolean;
 }
 
-function parseJsonlForUsage(filePath: string): RawRequest[] {
-    try {
-        const content = fs.readFileSync(filePath, 'utf-8');
-        const lines = content.split('\n').filter(l => l.trim());
-
-        const requests = new Map<number, RawRequest>();
-        let nextIndex = 0;
-
-        for (const line of lines) {
-            let obj: any;
-            try { obj = JSON.parse(line); } catch { continue; }
-
-            const kind: number = obj.kind;
-            const k: any[] = obj.k || [];
-            const v: any = obj.v;
-
-            // kind=2 k=['requests'] — batch append of new request objects
-            if (kind === 2 && k.length === 1 && k[0] === 'requests' && Array.isArray(v)) {
-                for (const req of v) {
-                    requests.set(nextIndex, {
-                        model: req?.model || '',
-                        inputTokens: 0,
-                        outputTokens: 0,
-                        completed: false,
-                    });
-                    nextIndex++;
-                }
-            }
-
-            // Field update on a specific request: k=['requests', N, fieldName]
-            if (k[0] === 'requests' && typeof k[1] === 'number' && k.length === 3) {
-                const idx = k[1];
-                const field = k[2];
-
-                if (!requests.has(idx)) {
-                    requests.set(idx, { model: '', inputTokens: 0, outputTokens: 0, completed: false });
-                }
-                const entry = requests.get(idx)!;
-
-                if (field === 'result' && v?.metadata) {
-                    if (v.metadata.promptTokens)  { entry.inputTokens  = v.metadata.promptTokens; }
-                    if (v.metadata.outputTokens)  { entry.outputTokens = v.metadata.outputTokens; }
-                    if (v.metadata.modelId)        { entry.model        = v.metadata.modelId; }
-                }
-
-                if (field === 'model' && typeof v === 'string' && v) {
-                    entry.model = v;
-                }
-
-                if (field === 'modelState' && v?.value === 1) {
-                    entry.completed = true;
-                }
-            }
-        }
-
-        // Only count completed requests that have a model name
-        return [...requests.values()].filter(r => r.completed && r.model);
-    } catch {
-        return [];
-    }
-}
-
-// ─── Storage scanner ──────────────────────────────────────────────────────────
-
-function scanWorkspaceStorage(storageRoot: string): RawRequest[] {
+/**
+ * Scan a workspaceStorage root for chatSessions, and parse each file
+ * using the platform provider's parser.
+ */
+function scanWorkspaceStorage(storageRoot: string, provider: IDEPlatformProvider): RawRequest[] {
     const results: RawRequest[] = [];
+    const fileExt = provider.chatFileExtension;
+
     try {
         if (!fs.existsSync(storageRoot)) { return results; }
 
@@ -176,8 +62,23 @@ function scanWorkspaceStorage(storageRoot: string): RawRequest[] {
             catch { continue; }
 
             for (const f of files) {
-                if (!f.isFile() || !f.name.endsWith('.jsonl')) { continue; }
-                results.push(...parseJsonlForUsage(path.join(chatDir, f.name)));
+                if (!f.isFile() || !f.name.endsWith(fileExt)) { continue; }
+
+                try {
+                    const content = fs.readFileSync(path.join(chatDir, f.name), 'utf-8');
+                    const parsed = provider.parseChatFile(content);
+
+                    for (const req of parsed) {
+                        if (req.completed && req.model) {
+                            results.push({
+                                model: req.model,
+                                inputTokens: req.tokens?.prompt ?? 0,
+                                outputTokens: req.tokens?.output ?? 0,
+                                completed: true,
+                            });
+                        }
+                    }
+                } catch { /* ignore file read errors */ }
             }
         }
     } catch { /* ignore permission errors */ }
@@ -200,23 +101,45 @@ function aggregateRequests(raw: RawRequest[]): Record<string, IDEModelStat> {
 
 // ─── Cache ────────────────────────────────────────────────────────────────────
 
+// ─── Cache & Manual Usage ────────────────────────────────────────────────────────────
+
 let cache: IDEUsageResult[] | null = null;
 let cacheTime = 0;
 const CACHE_TTL_MS = 60_000; // 60 s
+
+export const manualUsage: Array<{ ideKey: string; req: RawRequest }> = [];
+
+export function appendUsageSample(ideKey: string, model: string, inputTokens: number, outputTokens: number) {
+    manualUsage.push({
+        ideKey,
+        req: { model, inputTokens, outputTokens, completed: true }
+    });
+    // Invalidate cache directly so UI updates
+    invalidateIDEUsageCache();
+}
 
 export function detectIDEUsage(): IDEUsageResult[] {
     const now = Date.now();
     if (cache && now - cacheTime < CACHE_TTL_MS) { return cache; }
 
-    const results: IDEUsageResult[] = IDE_CATALOGUE.map(({ key, displayName, storagePaths }) => {
+    const providers = getAllProviders();
+
+    const results: IDEUsageResult[] = providers.map(provider => {
         const allRaw: RawRequest[] = [];
         let detected = false;
 
-        for (const p of storagePaths) {
+        for (const p of provider.getChatStoragePaths()) {
             if (fs.existsSync(p)) {
                 detected = true;
-                allRaw.push(...scanWorkspaceStorage(p));
+                allRaw.push(...scanWorkspaceStorage(p, provider));
             }
+        }
+        
+        // Include manually tracked API usage
+        const manualForIde = manualUsage.filter(m => m.ideKey === provider.key).map(m => m.req);
+        if (manualForIde.length > 0) {
+            detected = true;
+            allRaw.push(...manualForIde);
         }
 
         const models = aggregateRequests(allRaw);
@@ -224,8 +147,8 @@ export function detectIDEUsage(): IDEUsageResult[] {
         const topModel = sorted[0]?.[0] ?? null;
 
         return {
-            ide: key,
-            displayName,
+            ide: provider.key,
+            displayName: provider.displayName,
             detected,
             models,
             topModel,
@@ -246,7 +169,13 @@ export function invalidateIDEUsageCache(): void {
     cacheTime = 0;
 }
 
-/** Returns the colour chip for a given IDE key, for use in the dashboard. */
+/** Returns the colour for a given IDE key, for use in the dashboard. */
+export function getIDEColor(ideKey: string): string {
+    const provider = getAllProviders().find(p => p.key === ideKey);
+    return provider?.color ?? '#888';
+}
+
+/** Legacy export for backward compatibility */
 export const IDE_COLORS: Record<string, string> = Object.fromEntries(
-    IDE_CATALOGUE.map(e => [e.key, e.color])
+    getAllProviders().map(p => [p.key, p.color])
 );

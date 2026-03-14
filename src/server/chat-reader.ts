@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { sseManager } from './sse';
+import { getPlatform } from './platform';
 
 export interface ChatMessage {
     role: 'user' | 'assistant';
@@ -48,7 +49,7 @@ function watchActiveFile(filepath: string): void {
     if (fileWatcher) { fileWatcher.close(); fileWatcher = null; }
     try {
         fileWatcher = fs.watch(filepath, { persistent: false }, () => {
-            // Debounce: VS Code may fire multiple rapid writes during streaming.
+            // Debounce: IDE may fire multiple rapid writes during streaming.
             if (watchDebounceTimer) { clearTimeout(watchDebounceTimer); }
             watchDebounceTimer = setTimeout(() => { checkForUpdates(); }, 80);
         });
@@ -56,7 +57,10 @@ function watchActiveFile(filepath: string): void {
 }
 
 export function initChatReader(context: vscode.ExtensionContext): void {
-    // Find chatSessions directory — check multiple locations
+    const platform = getPlatform();
+    const fileExt = platform.chatFileExtension;
+
+    // Build candidate directories — platform-specific + context-derived
     const candidates: string[] = [];
 
     // 1. From extension storage URI — go up to workspace storage root
@@ -65,14 +69,12 @@ export function initChatReader(context: vscode.ExtensionContext): void {
         candidates.push(path.join(wsRoot, 'chatSessions'));
     }
 
-    // 2. Search all workspaceStorage directories for chatSessions
-    const appData = process.env.APPDATA || '';
-    if (appData) {
-        const wsStorageRoot = path.join(appData, 'Code', 'User', 'workspaceStorage');
+    // 2. Platform-specific chat storage paths
+    for (const storagePath of platform.getChatStoragePaths()) {
         try {
-            if (fs.existsSync(wsStorageRoot)) {
-                for (const d of fs.readdirSync(wsStorageRoot)) {
-                    const chatDir = path.join(wsStorageRoot, d, 'chatSessions');
+            if (fs.existsSync(storagePath)) {
+                for (const d of fs.readdirSync(storagePath)) {
+                    const chatDir = path.join(storagePath, d, 'chatSessions');
                     if (!candidates.includes(chatDir)) {
                         candidates.push(chatDir);
                     }
@@ -81,11 +83,11 @@ export function initChatReader(context: vscode.ExtensionContext): void {
         } catch { /* ignore */ }
     }
 
-    // Find a chatSessions directory with JSONL files
+    // Find a chatSessions directory with matching files
     for (const dir of candidates) {
         try {
             if (fs.existsSync(dir)) {
-                const files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'));
+                const files = fs.readdirSync(dir).filter(f => f.endsWith(fileExt));
                 if (files.length > 0) {
                     chatSessionsDir = dir;
                     break;
@@ -95,11 +97,11 @@ export function initChatReader(context: vscode.ExtensionContext): void {
     }
 
     if (!chatSessionsDir) {
-        console.log('[ChatReader] No chatSessions directory found');
+        console.log(`[ChatReader] No chatSessions directory found for ${platform.displayName}`);
         return;
     }
 
-    console.log(`[ChatReader] Using: ${chatSessionsDir}`);
+    console.log(`[ChatReader] Using: ${chatSessionsDir} (${platform.displayName})`);
     selectActiveSession();
 
     // 800 ms safety-net poll — catches anything fs.watch misses
@@ -109,11 +111,14 @@ export function initChatReader(context: vscode.ExtensionContext): void {
     }, 800);
 }
 
-/** Pick the most recently modified JSONL file as the active session */
+/** Pick the most recently modified chat file as the active session */
 function selectActiveSession(): void {
+    const platform = getPlatform();
+    const fileExt = platform.chatFileExtension;
+
     try {
         const files = fs.readdirSync(chatSessionsDir)
-            .filter(f => f.endsWith('.jsonl'))
+            .filter(f => f.endsWith(fileExt))
             .map(f => {
                 const full = path.join(chatSessionsDir, f);
                 const stat = fs.statSync(full);
@@ -136,7 +141,7 @@ function selectActiveSession(): void {
     } catch { /* ignore */ }
 }
 
-/** Read new content from the active JSONL and parse incrementally */
+/** Read new content from the active session file and parse via platform provider */
 function checkForUpdates(): void {
     if (!activeSessionFile) { return; }
 
@@ -144,7 +149,7 @@ function checkForUpdates(): void {
         const stat = fs.statSync(activeSessionFile);
         if (stat.size === lastFileSize) { return; }
 
-        // Read the full file and re-parse (JSONL is an update log, order matters)
+        // Read the full file and re-parse via the platform provider
         const content = fs.readFileSync(activeSessionFile, 'utf-8');
         lastFileSize = stat.size;
 
@@ -165,92 +170,16 @@ function checkForUpdates(): void {
     } catch { /* ignore read errors */ }
 }
 
-/** Parse JSONL update log into a list of ChatMessages */
+/** Parse session file content using the platform provider's parser */
 function parseSession(content: string): ChatMessage[] {
-    const lines = content.split('\n').filter(l => l.trim());
+    const platform = getPlatform();
+    const parsed = platform.parseChatFile(content);
 
-    // Track requests by index
-    const requests: Map<number, {
-        prompt: string;
-        response: string;
-        timestamp: number;
-        completed: boolean;
-        tokens?: { prompt?: number; output?: number };
-        model?: string;
-    }> = new Map();
-
-    let nextIndex = 0;
-
-    for (const line of lines) {
-        let obj: any;
-        try { obj = JSON.parse(line); } catch { continue; }
-
-        const kind: number = obj.kind;
-        const k: any[] = obj.k || [];
-        const v: any = obj.v;
-
-        // kind=2, k=['requests'] — new request appended
-        if (kind === 2 && k.length === 1 && k[0] === 'requests' && Array.isArray(v)) {
-            for (const req of v) {
-                const text = req?.message?.text || '';
-                const ts = req?.timestamp || Date.now();
-                requests.set(nextIndex, {
-                    prompt: text,
-                    response: '',
-                    timestamp: ts,
-                    completed: false,
-                });
-                nextIndex++;
-            }
-        }
-
-        // Fields on a specific request: k=['requests', N, fieldName]
-        if (k[0] === 'requests' && typeof k[1] === 'number' && k.length === 3) {
-            const idx = k[1];
-            const field = k[2];
-
-            if (!requests.has(idx)) {
-                requests.set(idx, { prompt: '', response: '', timestamp: 0, completed: false });
-            }
-            const entry = requests.get(idx)!;
-
-            if (field === 'response' && Array.isArray(v)) {
-                // Response content (latest snapshot replaces previous)
-                const text = v.map((item: any) =>
-                    typeof item === 'string' ? item : (item?.value || '')
-                ).join('');
-                if (text) { entry.response = text; }
-            }
-
-            if (field === 'modelState' && v?.value === 1) {
-                entry.completed = true;
-            }
-
-            if (field === 'result' && v?.metadata) {
-                entry.tokens = {
-                    prompt: v.metadata.promptTokens,
-                    output: v.metadata.outputTokens,
-                };
-                if (v.metadata.modelId) {
-                    entry.model = v.metadata.modelId;
-                }
-            }
-
-            if (field === 'model' && typeof v === 'string') {
-                entry.model = v;
-            }
-
-            if (field === 'message' && v?.text) {
-                entry.prompt = v.text;
-            }
-        }
-    }
-
-    // Convert to flat message list
+    // Convert ParsedChatRequest[] to ChatMessage[] and build usage samples
     const messages: ChatMessage[] = [];
-    const sorted = [...requests.entries()].sort((a, b) => a[0] - b[0]);
+    const samples: UsageSample[] = [];
 
-    for (const [idx, req] of sorted) {
+    parsed.forEach((req, idx) => {
         if (req.prompt) {
             messages.push({
                 role: 'user',
@@ -270,22 +199,19 @@ function parseSession(content: string): ChatMessage[] {
                 model: req.model,
             });
         }
-    }
 
-    // Build usage samples from completed requests that have token data
-    const samples: UsageSample[] = [];
-    for (const [, req] of sorted) {
+        // Build usage samples from completed requests with token data
         if (req.completed && req.tokens?.prompt !== undefined && req.tokens?.output !== undefined) {
             samples.push({
                 timestamp: req.timestamp,
-                model: req.model || 'copilot',
+                model: req.model || 'unknown',
                 inputTokens: req.tokens.prompt ?? 0,
                 outputTokens: req.tokens.output ?? 0,
             });
         }
-    }
-    cachedUsageSamples = samples;
+    });
 
+    cachedUsageSamples = samples;
     return messages;
 }
 

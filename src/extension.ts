@@ -3,6 +3,7 @@ import { RemoteServer } from './server/index';
 import { TunnelManager } from './server/tunnel';
 import { initIDEBridge } from './server/ide-bridge';
 import { initChatReader, disposeChatReader } from './server/chat-reader';
+import { detectPlatform } from './server/platform';
 import * as qrcode from 'qrcode';
 
 let server: RemoteServer | null = null;
@@ -10,6 +11,9 @@ let tunnel: TunnelManager | null = null;
 let statusBar: vscode.StatusBarItem;
 
 export async function activate(context: vscode.ExtensionContext) {
+    // Detect IDE platform (VS Code, Cursor, Antigravity) before anything else
+    const platform = detectPlatform();
+    console.log(`[RemoteControl] Running on ${platform.displayName}`);
     const toggleCmd = vscode.commands.registerCommand(
         'remoteControl.toggle',
         async () => {

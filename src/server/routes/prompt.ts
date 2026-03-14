@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import * as vscode from 'vscode';
 import { CDPClient } from '../cdp';
+import { getPlatform } from '../platform';
 
 const cdp = new CDPClient();
 let cdpAvailable = false;
@@ -30,9 +31,13 @@ export function promptRoutes() {
             return;
         }
 
+        // Use the platform-specific chat open command
+        const platform = getPlatform();
+        const chatCommands = platform.getChatCommands();
+
         try {
-            await vscode.commands.executeCommand('workbench.action.chat.open', { query: prompt });
-            res.json({ success: true, method: 'vscode-command' });
+            await vscode.commands.executeCommand(chatCommands.openChat, { query: prompt });
+            res.json({ success: true, method: 'vscode-command', ide: platform.key });
         } catch {
             res.json({ success: false, error: 'Failed to send prompt' });
         }

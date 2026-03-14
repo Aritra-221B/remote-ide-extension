@@ -5,6 +5,8 @@ import { sseManager } from '../sse';
 import { addActivity, getRecentActivity } from '../activity';
 import { getChatMessages, triggerImmediateCheck } from '../chat-reader';
 import { markPromptSent, markReviewed, isPendingReview } from '../edit-state';
+import { getPlatform } from '../platform';
+import { appendUsageSample } from '../ide-usage-detector';
 
 const cdp = new CDPClient();
 let cdpAvailable = false;
@@ -21,6 +23,22 @@ async function tryConnectCDP() {
     if (cdpAvailable) { return true; }
     cdpAvailable = await cdp.connect();
     return cdpAvailable;
+}
+
+function logManualUsage(prompt: string) {
+    const platform = getPlatform();
+    const config = vscode.workspace.getConfiguration();
+    let model = 'unknown';
+    for (const key of platform.getModelConfigKeys()) {
+        const val = config.get<string>(key);
+        if (val) { model = val; break; }
+    }
+    
+    // Rough estimation: 1 token per 4 chars of prompt, assume 50 output tokens
+    const inputTokens = Math.max(1, Math.ceil(prompt.length / 4));
+    const outputTokens = 50; 
+    
+    appendUsageSample(platform.key, model, inputTokens, outputTokens);
 }
 
 export function chatRoutes(context: vscode.ExtensionContext) {
@@ -64,24 +82,29 @@ export function chatRoutes(context: vscode.ExtensionContext) {
             return;
         }
 
+        const platform = getPlatform();
+        const chatCommands = platform.getChatCommands();
+
         // Try CDP first, fallback to VS Code command
         if (cdpAvailable) {
             const success = await cdp.sendPrompt(prompt);
             addActivity('prompt', `Prompt: ${prompt.substring(0, 100)}`);
             markPromptSent();
+            logManualUsage(prompt);
             res.json({ success });
-            // Kick off an immediate JSONL check so the SSE fires as soon
-            // as VS Code writes the first response chunk (don't wait for poll).
+            // Kick off an immediate check so the SSE fires as soon
+            // as the IDE writes the first response chunk (don't wait for poll).
             setTimeout(() => triggerImmediateCheck(), 300);
             setTimeout(() => triggerImmediateCheck(), 800);
             return;
         }
 
         try {
-            await vscode.commands.executeCommand('workbench.action.chat.open', { query: prompt });
+            await vscode.commands.executeCommand(chatCommands.openChat, { query: prompt });
             addActivity('prompt', `Prompt: ${prompt.substring(0, 100)}`);
             markPromptSent();
-            res.json({ success: true, method: 'vscode-command' });
+            logManualUsage(prompt);
+            res.json({ success: true, method: 'vscode-command', ide: platform.key });
             setTimeout(() => triggerImmediateCheck(), 300);
             setTimeout(() => triggerImmediateCheck(), 800);
         } catch {
@@ -89,7 +112,7 @@ export function chatRoutes(context: vscode.ExtensionContext) {
         }
     });
 
-    // POST /api/chat/poll — client calls this to force an immediate JSONL check.
+    // POST /api/chat/poll — client calls this to force an immediate check.
     // Used during the burst-poll phase right after a prompt is sent.
     router.post('/poll', (req, res) => {
         triggerImmediateCheck();
@@ -103,6 +126,9 @@ export function chatRoutes(context: vscode.ExtensionContext) {
             return;
         }
 
+        const platform = getPlatform();
+        const chatCommands = platform.getChatCommands();
+
         // Try CDP first
         if (cdpAvailable) {
             const success = await cdp.clickAction(action);
@@ -114,61 +140,37 @@ export function chatRoutes(context: vscode.ExtensionContext) {
             }
         }
 
-        // Fallback: VS Code commands — fire all relevant commands
-        // Different VS Code versions / contexts use different command IDs.
+        // Fallback: VS Code commands — fire all relevant commands from the platform provider.
+        // Different IDE versions / contexts use different command IDs.
         // We fire all of them because executeCommand silently succeeds
         // when the command exists but has nothing to act on.
         try {
-            if (action === 'accept') {
-                await fireAll(
-                    // Agent mode edit review — Keep button (VS Code 2025+)
-                    'workbench.action.chat.acceptEditRequest',
-                    'chatEditor.action.accept',
-                    'chat.acceptChanges',
-                    'chat.keepEdit',
-                    // Inline chat (Ctrl+I) edits
-                    'inlineChat.acceptChanges',
-                    'inlineChat.accept',
-                    // Inline completions (ghost text)
-                    'editor.action.inlineSuggest.commit',
-                    // Notebook cell edits
-                    'notebook.cell.chat.acceptChanges'
-                );
-            } else {
-                await fireAll(
-                    // Agent mode edit review — Undo button (VS Code 2025+)
-                    'workbench.action.chat.rejectEditRequest',
-                    'chatEditor.action.reject',
-                    'chat.undoChanges',
-                    'chat.undoEdit',
-                    // Inline chat (Ctrl+I) edits
-                    'inlineChat.discard',
-                    'inlineChat.close',
-                    // Inline completions (ghost text)
-                    'editor.action.inlineSuggest.hide',
-                    // Notebook cell edits
-                    'notebook.cell.chat.discard'
-                );
-            }
+            const commands = action === 'accept'
+                ? chatCommands.acceptCommands
+                : chatCommands.rejectCommands;
+
+            await fireAll(...commands);
             addActivity('action', `${action === 'accept' ? '✅ Accepted' : '❌ Rejected'} changes`);
             markReviewed();
-            res.json({ success: true, method: 'vscode-command' });
+            res.json({ success: true, method: 'vscode-command', ide: platform.key });
         } catch (err: any) {
             res.json({ success: false, error: err.message });
         }
     });
 
     router.get('/status', (req, res) => {
-        res.json({ success: true, cdpConnected: cdpAvailable });
+        const platform = getPlatform();
+        res.json({ success: true, cdpConnected: cdpAvailable, ide: platform.key });
     });
 
-    // Debug: list available chat/edit command IDs in this VS Code version
+    // Debug: list available chat/edit command IDs in this IDE version
     router.get('/commands', async (req, res) => {
         try {
             const all = await vscode.commands.getCommands(true);
             const chatCmds = all.filter(c =>
                 c.includes('chat') || c.includes('inlineChat') ||
-                c.includes('inlineSuggest') || c.includes('chatEditor')
+                c.includes('inlineSuggest') || c.includes('chatEditor') ||
+                c.includes('antigravity') || c.includes('cursor')
             ).sort();
             res.json({ success: true, commands: chatCmds });
         } catch (err: any) {

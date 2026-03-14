@@ -6,6 +6,42 @@ let currentPath = '';
 let eventSource = null;
 let promptPending = false; // true after sending a prompt, until accept/reject
 
+// Platform info — fetched once on startup, drives dynamic IDE name display
+let platformInfo = { displayName: 'AI', key: 'unknown', color: '#888', supportedModels: [] };
+
+async function fetchPlatformInfo() {
+    try {
+        const data = await api('/usage/platform-info');
+        if (data.success) {
+            platformInfo = data;
+            // Update header to show IDE name
+            const titleEl = document.querySelector('.header-title');
+            if (titleEl) titleEl.textContent = `Remote IDE`;
+            // Update the header with IDE badge
+            const headerRight = document.querySelector('.header-right');
+            let badge = document.getElementById('ide-badge');
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.id = 'ide-badge';
+                badge.className = 'ide-name-badge';
+                headerRight.insertBefore(badge, headerRight.firstChild);
+            }
+            badge.textContent = platformInfo.displayName;
+            badge.style.setProperty('--ide-accent', platformInfo.color);
+        }
+    } catch { /* ignore - will use defaults */ }
+}
+
+function getAssistantName() {
+    // Map IDE to its AI assistant name
+    const nameMap = {
+        'antigravity': 'Gemini',
+        'cursor': 'AI',
+        'vscode': 'Copilot',
+    };
+    return nameMap[platformInfo.key] || platformInfo.displayName || 'AI';
+}
+
 // === SVG Icon Helper ===
 function icon(name, size = 16) {
     return `<svg width="${size}" height="${size}"><use href="#i-${name}"/></svg>`;
@@ -250,7 +286,7 @@ function showThinkingIndicator() {
     div.className = 'chat-msg chat-msg-assistant thinking';
     div.innerHTML = `
         <div class="chat-msg-header">
-            <span class="chat-role">${icon('bot', 14)} Copilot</span>
+            <span class="chat-role">${icon('bot', 14)} ${getAssistantName()}</span>
             <span class="chat-status pending">Thinking…</span>
         </div>
         <div class="chat-msg-body thinking-dots"><span></span><span></span><span></span></div>
@@ -359,7 +395,7 @@ function appendChatMessage(msg, scroll) {
         const statusText = msg.completed ? 'Done' : 'Thinking...';
         div.innerHTML = `
             <div class="chat-msg-header">
-                <span class="chat-role">${icon('bot', 14)} Copilot</span>
+                <span class="chat-role">${icon('bot', 14)} ${getAssistantName()}</span>
                 <span class="chat-status ${statusClass}">${statusText}</span>
                 ${tokenInfo}
                 <span class="chat-time">${formatTime(msg.timestamp)}</span>
@@ -630,8 +666,15 @@ async function refreshUsage() {
             <div class="kpi-value">$${grandCost.toFixed(4)}</div>
             <div class="kpi-label">Est. Cost</div>
         </div>
-        <div class="kpi-card">
-            <div class="kpi-value" style="font-size:0.72em;word-break:break-all;line-height:1.2">${modelData.model || 'N/A'}</div>
+        <div class="kpi-card" style="grid-column: span 2;">
+            <div class="kpi-value" style="font-size:0.85em;">
+                <select class="model-select" onchange="updateModel(this)" ${platformInfo.supportedModels.length === 0 ? 'disabled' : ''}>
+                    ${platformInfo.supportedModels.length > 0
+                        ? platformInfo.supportedModels.map(m => `<option value="${m}" ${m === modelData.model ? 'selected' : ''}>${m}</option>`).join('')
+                        : `<option>${modelData.model || 'N/A'}</option>`
+                    }
+                </select>
+            </div>
             <div class="kpi-label">Active Model</div>
         </div>
     `;
@@ -693,6 +736,21 @@ async function refreshUsage() {
             <div class="ide-models">${modelRows}</div>
         </div>`;
     }).join('');
+}
+
+async function updateModel(select) {
+    const model = select.value;
+    select.disabled = true;
+    try {
+        const data = await api('/usage/current-model', {
+            method: 'POST',
+            body: JSON.stringify({ model })
+        });
+        showToast(data.success ? `Switched to ${model}` : `Error: ${data.error}`);
+    } catch (e) {
+        showToast(`Error: ${e.message}`);
+    }
+    select.disabled = false;
 }
 
 // === Bugs ===
@@ -797,10 +855,13 @@ function escapeHtml(str) {
 }
 
 // === Init ===
-connectSSE();
-loadChat();
-fetchIDEStatus();
-checkPendingReview();
+// Boot sequence — fetch platform info first, then everything else
+fetchPlatformInfo().then(() => {
+    connectSSE();
+    loadChat();
+    fetchIDEStatus();
+    checkPendingReview();
+});
 
 async function checkPendingReview() {
     try {

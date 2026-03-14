@@ -1,4 +1,6 @@
 import CDP from 'chrome-remote-interface';
+import { getPlatform } from './platform';
+import type { CDPSelectors } from './platform';
 
 export class CDPClient {
     private client: any = null;
@@ -15,8 +17,11 @@ export class CDPClient {
             await this.client.Runtime.enable();
             await this.client.DOM.enable();
             return true;
-        } catch (err) {
-            console.error('CDP connection failed:', err);
+        } catch (err: any) {
+            // Only log if it's NOT a standard connection refused (which is expected if launched normally)
+            if (err.code !== 'ECONNREFUSED') {
+                console.error('CDP connection failed:', err.message);
+            }
             return false;
         }
     }
@@ -25,14 +30,32 @@ export class CDPClient {
         return this.client !== null;
     }
 
+    /**
+     * Returns the platform-specific CDP selectors.
+     * Falls back to safe defaults if platform isn't initialised yet.
+     */
+    private getSelectors(): CDPSelectors {
+        try {
+            return getPlatform().getCDPSelectors();
+        } catch {
+            // Platform not initialised yet — use safe defaults
+            return {
+                chatContainer: '.chat-widget, [class*="chat"]',
+                chatInput: 'textarea[class*="chat"], .chat-input textarea',
+                acceptLabels: ['Keep', 'Accept'],
+                rejectLabels: ['Undo', 'Discard', 'Reject'],
+            };
+        }
+    }
+
     async getChatHTML(): Promise<string> {
         if (!this.client) { return '<p>CDP not connected</p>'; }
+        const selectors = this.getSelectors();
         try {
             const result = await this.client.Runtime.evaluate({
                 expression: `
                     (() => {
-                        const chat = document.querySelector('.chat-widget')
-                            || document.querySelector('[class*="chat"]');
+                        const chat = document.querySelector(${JSON.stringify(selectors.chatContainer)});
                         return chat ? chat.innerHTML : '<p>No chat found</p>';
                     })()
                 `,
@@ -56,12 +79,12 @@ export class CDPClient {
 
     async sendPrompt(text: string): Promise<boolean> {
         if (!this.client) { return false; }
+        const selectors = this.getSelectors();
         try {
             const result = await this.client.Runtime.evaluate({
                 expression: `
                     (() => {
-                        const input = document.querySelector('textarea[class*="chat"]')
-                            || document.querySelector('.chat-input textarea');
+                        const input = document.querySelector(${JSON.stringify(selectors.chatInput)});
                         if (!input) return false;
                         const nativeSet = Object.getOwnPropertyDescriptor(
                             window.HTMLTextAreaElement.prototype, 'value'
@@ -69,8 +92,14 @@ export class CDPClient {
                         if (nativeSet) nativeSet.call(input, ${JSON.stringify(text)});
                         else input.value = ${JSON.stringify(text)};
                         input.dispatchEvent(new Event('input', { bubbles: true }));
-                        const btn = document.querySelector('button[class*="send"]');
-                        if (btn) btn.click();
+                        
+                        const btn = document.querySelector('button[class*="send"], button[aria-label*="Send"], .send-button');
+                        if (btn) {
+                            btn.click();
+                        } else {
+                            // If no clear send button, trigger Enter key
+                            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                        }
                         return true;
                     })()
                 `,
@@ -84,10 +113,10 @@ export class CDPClient {
 
     async clickAction(action: 'accept' | 'reject'): Promise<boolean> {
         if (!this.client) { return false; }
-        // VS Code shows "Keep" / "Undo" (2025+) or "Accept" / "Discard" (older)
+        const selectors = this.getSelectors();
         const labels = action === 'accept'
-            ? ['Keep', 'Accept']
-            : ['Undo', 'Discard', 'Reject'];
+            ? selectors.acceptLabels
+            : selectors.rejectLabels;
         try {
             const result = await this.client.Runtime.evaluate({
                 expression: `
