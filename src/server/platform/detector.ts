@@ -92,13 +92,20 @@ function detectIDEKey(): IDEPlatformKey {
     } catch { /* ignore */ }
 
     // 3. Check environment variables
-    if (process.env.ANTIGRAVITY_DEV || process.env.ANTIGRAVITY_HOME) {
+    if (process.env.ANTIGRAVITY_DEV || process.env.ANTIGRAVITY_HOME || process.env.ANTIGRAVITY_AGENT || process.env.ANTIGRAVITY_CLI_ALIAS) {
         return 'antigravity';
     }
     if (process.env.CURSOR_DEV || process.env.CURSOR_HOME) {
         return 'cursor';
     }
 
-    // 4. Default to VS Code
+    // 4. Check secondary paths in environment (like git askpass node)
+    try {
+        const askpassNode = (process.env.VSCODE_GIT_ASKPASS_NODE || '').toLowerCase();
+        if (askpassNode.includes('antigravity')) { return 'antigravity'; }
+        if (askpassNode.includes('cursor'))      { return 'cursor'; }
+    } catch { /* ignore */ }
+
+    // 5. Default to VS Code
     return 'vscode';
 }
