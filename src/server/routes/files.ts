@@ -9,7 +9,9 @@ import * as path from 'path';
  */
 function safePath(workspaceRoot: string, requestedPath: string): string | null {
     const resolved = path.resolve(workspaceRoot, requestedPath);
-    if (!resolved.startsWith(workspaceRoot + path.sep) && resolved !== workspaceRoot) {
+    const normResolved = resolved.toLowerCase();
+    const normRoot = workspaceRoot.toLowerCase();
+    if (!normResolved.startsWith(normRoot + path.sep.toLowerCase()) && normResolved !== normRoot) {
         return null;
     }
     return resolved;

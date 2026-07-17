@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as http from 'http';
 import { v4 as uuidv4 } from 'uuid';
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import { authMiddleware } from './middleware';
 import { chatRoutes, stopChatPolling } from './routes/chat';
 import { terminalRoutes } from './routes/terminal';
@@ -16,6 +17,12 @@ import { bugfixRoutes } from './routes/bugfix';
 import { ideRoutes } from './routes/ide';
 import { sseManager } from './sse';
 
+function logDebug(msg: string) {
+    try {
+        fs.appendFileSync('i:\\remote-ide-extension\\extension_run_debug.log', `[${new Date().toISOString()}] ${msg}\n`);
+    } catch {}
+}
+
 export class RemoteServer {
     private app: express.Application;
     private httpServer: http.Server | null = null;
@@ -26,9 +33,17 @@ export class RemoteServer {
         this.sessionToken = uuidv4();
         this.app = express();
 
-        // Serve dashboard static files
+        this.app.use((req, res, next) => {
+            logDebug(`[Request] ${req.method} ${req.url}`);
+            res.on('finish', () => {
+                logDebug(`[Response] ${req.method} ${req.url} -> ${res.statusCode}`);
+            });
+            next();
+        });
+
+        // Serve dashboard static files copied during bundle step.
         this.app.use('/dashboard', express.static(
-            path.join(context.extensionPath, 'src', 'dashboard')
+            path.join(context.extensionPath, 'dist', 'dashboard')
         ));
 
         this.app.use(express.json({ limit: '50mb' }));

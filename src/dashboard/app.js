@@ -1,12 +1,10 @@
-// === State ===
 const params = new URLSearchParams(window.location.search);
 const TOKEN = params.get('token') || '';
 const BASE = window.location.origin;
 let currentPath = '';
 let eventSource = null;
-let promptPending = false; // true after sending a prompt, until accept/reject
+let promptPending = false;
 
-// Platform info — fetched once on startup, drives dynamic IDE name display
 let platformInfo = { displayName: 'AI', key: 'unknown', color: '#888', supportedModels: [] };
 
 async function fetchPlatformInfo() {
@@ -14,10 +12,6 @@ async function fetchPlatformInfo() {
         const data = await api('/usage/platform-info');
         if (data.success) {
             platformInfo = data;
-            // Update header to show IDE name
-            const titleEl = document.querySelector('.header-title');
-            if (titleEl) titleEl.textContent = `Remote IDE`;
-            // Update the header with IDE badge
             const headerRight = document.querySelector('.header-right');
             let badge = document.getElementById('ide-badge');
             if (!badge) {
@@ -29,11 +23,10 @@ async function fetchPlatformInfo() {
             badge.textContent = platformInfo.displayName;
             badge.style.setProperty('--ide-accent', platformInfo.color);
         }
-    } catch { /* ignore - will use defaults */ }
+    } catch { }
 }
 
 function getAssistantName() {
-    // Map IDE to its AI assistant name
     const nameMap = {
         'antigravity': 'Gemini',
         'cursor': 'AI',
@@ -42,18 +35,15 @@ function getAssistantName() {
     return nameMap[platformInfo.key] || platformInfo.displayName || 'AI';
 }
 
-// === SVG Icon Helper ===
 function icon(name, size = 16) {
     return `<svg width="${size}" height="${size}"><use href="#i-${name}"/></svg>`;
 }
 
-// Activity type → icon mapping
 const ACTIVITY_ICON_MAP = {
     'prompt': 'chat', 'action': 'zap', 'file-edit': 'file',
     'file-save': 'file', 'error': 'x', 'info': 'file', 'terminal': 'terminal'
 };
 
-// === API Helper ===
 async function api(endpoint, options = {}) {
     const url = new URL(`/api${endpoint}`, BASE);
     url.searchParams.set('token', TOKEN);
@@ -64,7 +54,6 @@ async function api(endpoint, options = {}) {
     return res.json();
 }
 
-// === SSE ===
 let sseConnected = false;
 function connectSSE() {
     const url = `${BASE}/api/events?token=${encodeURIComponent(TOKEN)}`;
@@ -76,7 +65,6 @@ function connectSSE() {
         const dot = document.getElementById('status-dot');
         dot.classList.add('connected');
         document.getElementById('status-label').textContent = 'Connected';
-        // Re-hydrate chat after a reconnect — messages may have arrived while offline
         if (wasConnected && isActiveTab('chat')) {
             loadChat();
         }
@@ -96,14 +84,11 @@ function connectSSE() {
 
     eventSource.addEventListener('chat-message', (e) => {
         const msg = JSON.parse(e.data);
-        // BUG FIX: if we were in activity mode (no prior messages), switch to
-        // conversation mode automatically so the incoming message is visible.
         if (chatViewMode !== 'conversation') {
             switchToConversationMode();
         }
         removeThinkingIndicator();
         appendChatMessage(msg, true);
-        // Stop burst polling once a completed response arrives
         if (msg.role === 'assistant' && msg.completed) stopResponsePoll();
     });
 
@@ -129,7 +114,6 @@ function connectSSE() {
         output.scrollTop = output.scrollHeight;
     });
 
-    // --- IDE real-time events ---
     eventSource.addEventListener('ide-active-editor', (e) => {
         const data = JSON.parse(e.data);
         updateActiveFile(data.file, data.languageId);
@@ -213,7 +197,6 @@ function startStatusPolling() {
     }, 5000);
 }
 
-// === Tab Navigation (Bottom Nav) ===
 document.querySelectorAll('.nav-item').forEach(navBtn => {
     navBtn.addEventListener('click', () => {
         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -235,18 +218,12 @@ function onTabActivated(tab) {
     if (tab === 'bugs') loadBugs();
 }
 
-// === Chat ===
 let chatViewMode = 'conversation';
 
-/** Returns true if the given tab panel is currently visible. */
 function isActiveTab(tabName) {
     return document.getElementById(`tab-${tabName}`)?.classList.contains('active');
 }
 
-/**
- * Switches the chat container to conversation mode without a full reload.
- * Called when an SSE message arrives while we’re in activity mode.
- */
 function switchToConversationMode() {
     chatViewMode = 'conversation';
     const container = document.getElementById('chat-container');
@@ -254,12 +231,9 @@ function switchToConversationMode() {
     addChatViewToggle(container);
 }
 
-// === Burst polling after a prompt is sent ===
-// Calls POST /chat/poll every 800 ms to force the server to check the JSONL
-// immediately, rather than waiting for the background timer.
 let responsePollTimer = null;
 let responsePollCount = 0;
-const RESPONSE_POLL_MAX = 38; // 38 × 800ms ≈ 30 s
+const RESPONSE_POLL_MAX = 38;
 
 function startResponsePoll() {
     stopResponsePoll();
@@ -267,7 +241,14 @@ function startResponsePoll() {
     responsePollTimer = setInterval(async () => {
         responsePollCount++;
         if (responsePollCount > RESPONSE_POLL_MAX) { stopResponsePoll(); return; }
-        try { await api('/chat/poll', { method: 'POST' }); } catch { /* ignore */ }
+        try {
+            const data = await api('/chat/poll', { method: 'POST' });
+            // Fallback: if SSE is buffered/dead (e.g. behind a proxy),
+            // render the messages returned by the poll directly.
+            if (!sseConnected && data && data.messages) {
+                syncAssistantMessages(data.messages);
+            }
+        } catch { }
     }, 800);
 }
 
@@ -275,7 +256,25 @@ function stopResponsePoll() {
     if (responsePollTimer) { clearInterval(responsePollTimer); responsePollTimer = null; }
 }
 
-// "Thinking…" placeholder while waiting for the first assistant token
+/** Render the latest messages from a poll response (SSE fallback path). */
+function syncAssistantMessages(messages) {
+    if (chatViewMode !== 'conversation' || !messages.length) return;
+    const container = document.getElementById('chat-container');
+    // Only sync the most recent assistant message — user msgs are optimistic
+    const last = messages[messages.length - 1];
+    if (last.role !== 'assistant') return;
+    removeThinkingIndicator();
+    const existing = container.querySelector(
+        `.chat-msg-assistant[data-request-index="${last.requestIndex}"]`
+    );
+    if (existing) {
+        updateChatMessage(last);
+    } else {
+        appendChatMessage(last, true);
+    }
+    if (last.completed) stopResponsePoll();
+}
+
 const THINKING_ID = '__thinking_indicator__';
 function showThinkingIndicator() {
     removeThinkingIndicator();
@@ -313,7 +312,7 @@ async function loadChat() {
             container.scrollTop = container.scrollHeight;
             return;
         }
-    } catch { /* fall through */ }
+    } catch { }
 
     chatViewMode = 'activity';
     seenActivityIds.clear();
@@ -330,7 +329,7 @@ async function loadChat() {
                     appendActivityEntry({ id: -2, time: Date.now(), type: 'info', text: `Active: ${shortPath(snap.activeFile)}` }, false);
                 }
             }
-        } catch { /* ignore */ }
+        } catch { }
     }
     container.scrollTop = container.scrollHeight;
 }
@@ -359,7 +358,7 @@ async function switchChatView(mode) {
                     appendChatMessage(msg, false);
                 }
             }
-        } catch { /* ignore */ }
+        } catch { }
     } else {
         seenActivityIds.clear();
         const actData = await api('/chat/activity');
@@ -442,28 +441,20 @@ function formatTime(ts) {
     return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-/** Lightweight markdown → HTML for mobile display */
 function renderMarkdownLite(md) {
     if (!md) return '';
     let html = escapeHtml(md);
 
-    // Code blocks
     html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
         return `<pre class="chat-code"><code>${code.trim()}</code></pre>`;
     });
-    // Inline code
     html = html.replace(/`([^`]+)`/g, '<code class="chat-inline-code">$1</code>');
-    // Headers
     html = html.replace(/^### (.+)$/gm, '<h4>$1</h4>');
     html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>');
     html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
-    // Bold
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    // Italic
     html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-    // Line breaks
     html = html.replace(/\n/g, '<br>');
-    // Bullet lists
     html = html.replace(/^- (.+)/gm, '• $1');
 
     return html;
@@ -476,19 +467,16 @@ async function sendPrompt() {
     input.value = '';
     promptPending = true;
 
-    // Switch to conversation mode immediately so the user sees their own message
     if (chatViewMode !== 'conversation') {
         switchToConversationMode();
     }
 
-    // Optimistic: show the user’s own message instantly
     const optimisticMsg = {
         role: 'user', text: prompt,
         timestamp: Date.now(), requestIndex: -1, completed: true,
     };
     appendChatMessage(optimisticMsg, true);
 
-    // Show a "Thinking…" placeholder right away
     showThinkingIndicator();
 
     await api('/chat/send', {
@@ -496,7 +484,6 @@ async function sendPrompt() {
         body: JSON.stringify({ prompt }),
     });
 
-    // Start burst polling so the server checks the JSONL file every 800 ms
     startResponsePoll();
 }
 
@@ -522,7 +509,6 @@ function toggleQuickActions(show) {
     if (el) el.classList.toggle('hidden', !show);
 }
 
-// Prompt on Enter (Shift+Enter for newline)
 document.getElementById('prompt-input')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -530,29 +516,26 @@ document.getElementById('prompt-input')?.addEventListener('keydown', (e) => {
     }
 });
 
-// === Files ===
 async function navigateFiles(dirPath) {
     currentPath = dirPath;
     const data = await api(`/files/list?path=${encodeURIComponent(dirPath)}`);
     const list = document.getElementById('file-list');
 
-    // Update breadcrumb
     const breadcrumb = document.getElementById('file-breadcrumb');
     const parts = dirPath ? dirPath.split('/') : [];
     let html = `<button onclick="navigateFiles('')" class="crumb">${icon('home', 14)}<span>root</span></button>`;
     let accumulated = '';
     for (const part of parts) {
         accumulated += (accumulated ? '/' : '') + part;
-        const safePath = accumulated.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        html += `<button onclick="navigateFiles('${safePath}')" class="crumb">${icon('chevron', 10)}<span>${escapeHtml(part)}</span></button>`;
+        const escaped = escapeHtmlAttr(accumulated);
+        html += `<button onclick="navigateFiles('${escaped}')" class="crumb">${icon('chevron', 10)}<span>${escapeHtml(part)}</span></button>`;
     }
     breadcrumb.innerHTML = html;
 
-    // Render files
     if (data.items) {
         list.innerHTML = data.items.map(item => {
             const isDir = item.type === 'directory';
-            const safePath = item.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const safePath = escapeHtmlAttr(item.path);
             const clickAction = isDir
                 ? `navigateFiles('${safePath}')`
                 : `viewFile('${safePath}')`;
@@ -580,7 +563,6 @@ function closeFileViewer() {
     document.getElementById('file-viewer').classList.add('hidden');
 }
 
-// === Terminal ===
 async function loadTerminal() {
     const data = await api('/terminal/output');
     const output = document.getElementById('terminal-output');
@@ -592,6 +574,31 @@ async function loadTerminal() {
     output.scrollTop = output.scrollHeight;
     const cmdInput = document.getElementById('cmd-input');
     if (cmdInput) cmdInput.focus();
+    startTerminalPoll();
+}
+
+/** Poll terminal output while the tab is open — covers SSE being
+ *  buffered or dropped by the tunnel. */
+let terminalPollTimer = null;
+function startTerminalPoll() {
+    stopTerminalPoll();
+    terminalPollTimer = setInterval(async () => {
+        if (!isActiveTab('terminal')) { stopTerminalPoll(); return; }
+        if (sseConnected) return; // SSE handles live updates
+        try {
+            const data = await api('/terminal/output');
+            const output = document.getElementById('terminal-output');
+            if (data.output && output.textContent !== data.output) {
+                const atBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 40;
+                output.textContent = data.output;
+                if (atBottom) output.scrollTop = output.scrollHeight;
+            }
+        } catch { }
+    }, 2000);
+}
+
+function stopTerminalPoll() {
+    if (terminalPollTimer) { clearInterval(terminalPollTimer); terminalPollTimer = null; }
 }
 
 async function executeCommand() {
@@ -632,7 +639,6 @@ function bindTerminalInput() {
 bindTerminalInput();
 document.addEventListener('DOMContentLoaded', bindTerminalInput);
 
-// === Usage ===
 async function refreshUsage() {
     const [breakdown, modelData] = await Promise.all([
         api('/usage/ide-breakdown'),
@@ -641,7 +647,6 @@ async function refreshUsage() {
 
     const ides = breakdown.ides || [];
 
-    // ── Top-level KPI row: totals across all detected IDEs ──────────────────
     const detectedIdes  = ides.filter(i => i.detected);
     const grandRequests = detectedIdes.reduce((s, i) => s + i.totalRequests, 0);
     const grandIn       = detectedIdes.reduce((s, i) => s + i.totalInputTokens, 0);
@@ -666,8 +671,8 @@ async function refreshUsage() {
             <div class="kpi-value">$${grandCost.toFixed(4)}</div>
             <div class="kpi-label">Est. Cost</div>
         </div>
-        <div class="kpi-card" style="grid-column: span 2;">
-            <div class="kpi-value" style="font-size:0.85em;">
+        <div class="kpi-card">
+            <div class="kpi-value kpi-value--model">
                 <select class="model-select" onchange="updateModel(this)" ${platformInfo.supportedModels.length === 0 ? 'disabled' : ''}>
                     ${platformInfo.supportedModels.length > 0
                         ? platformInfo.supportedModels.map(m => `<option value="${m}" ${m === modelData.model ? 'selected' : ''}>${m}</option>`).join('')
@@ -679,7 +684,6 @@ async function refreshUsage() {
         </div>
     `;
 
-    // ── Per-IDE breakdown cards ──────────────────────────────────────────────
     const container = document.getElementById('ide-breakdown');
     container.innerHTML = ides.map(ide => {
         if (!ide.detected) {
@@ -704,7 +708,6 @@ async function refreshUsage() {
             </div>`;
         }
 
-        const topIdx = ide.models.findIndex(m => m.name === ide.topModel);
         const modelRows = ide.models.map((m, i) => `
             <div class="ide-model-row${i === 0 ? ' ide-model-row--top' : ''}">
                 <div class="ide-model-bar-wrap">
@@ -753,7 +756,6 @@ async function updateModel(select) {
     select.disabled = false;
 }
 
-// === Bugs ===
 async function loadBugs() {
     const data = await api('/bugs/list');
     const list = document.getElementById('bug-list');
@@ -820,7 +822,6 @@ async function verifyBug(id) {
     loadBugs();
 }
 
-// === Screenshot ===
 async function captureScreenshot() {
     const img = document.getElementById('screenshot-img');
     const btn = document.getElementById('capture-btn');
@@ -847,15 +848,21 @@ async function captureScreenshot() {
     }
 }
 
-// === Helpers ===
 function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str || '';
     return div.innerHTML;
 }
 
-// === Init ===
-// Boot sequence — fetch platform info first, then everything else
+function escapeHtmlAttr(str) {
+    if (!str) return '';
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/\\/g, '\\\\');
+}
+
 fetchPlatformInfo().then(() => {
     connectSSE();
     loadChat();
@@ -867,10 +874,9 @@ async function checkPendingReview() {
     try {
         const data = await api('/chat/pending');
         if (data.success) toggleQuickActions(data.pending);
-    } catch { /* ignore */ }
+    } catch { }
 }
 
-// === IDE Real-time Helpers ===
 function shortPath(fullPath) {
     if (!fullPath) return '';
     const parts = fullPath.replace(/\\/g, '/').split('/');
@@ -960,11 +966,11 @@ async function fetchIDEStatus() {
     try {
         const data = await api('/ide/status');
         if (data.success) applySnapshot(data);
-    } catch { /* ignore */ }
+    } catch { }
     setInterval(async () => {
         try {
             const data = await api('/ide/status');
             if (data.success) applySnapshot(data);
-        } catch { /* ignore */ }
+        } catch { }
     }, 5000);
 }

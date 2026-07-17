@@ -2,7 +2,7 @@
   "name": "remote-ide-extension",
   "displayName": "Remote IDE Extension",
   "description": "Control your IDE remotely from your phone via Cloudflare Tunnel",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "Aritra-221B",
   "author": {
     "name": "Aritra Banerjee",
@@ -22,7 +22,7 @@
   },
   "main": "./dist/extension.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-dashboard.js",
     "watch": "tsc -w",
     "package": "vsce package"
   },
@@ -38,7 +38,9 @@
     "copilot",
     "dashboard"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "commands": [
       {
@@ -82,6 +84,11 @@
           "type": "string",
           "default": "",
           "description": "Cloudflare tunnel token (required for 'named' mode)"
+        },
+        "remoteControl.customDomain": {
+          "type": "string",
+          "default": "",
+          "description": "Custom domain/URL for 'named' mode (e.g. 'https://my-ide.example.com')"
         }
       }
     }
@@ -99,7 +106,7 @@
     "@types/node": "^25.3.5",
     "@types/qrcode": "^1.5.6",
     "@types/uuid": "^10.0.0",
-    "@types/vscode": "^1.109.0",
+    "@types/vscode": "1.85.0",
     "@vscode/vsce": "^3.7.1",
     "typescript": "^5.9.3"
   }

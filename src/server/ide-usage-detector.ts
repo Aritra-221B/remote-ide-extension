@@ -42,9 +42,16 @@ interface RawRequest {
     completed: boolean;
 }
 
+interface FileCacheEntry {
+    mtime: number;
+    size: number;
+    requests: RawRequest[];
+}
+const fileCache = new Map<string, FileCacheEntry>();
+
 /**
  * Scan a workspaceStorage root for chatSessions, and parse each file
- * using the platform provider's parser.
+ * using the platform provider's parser. Optimized using a memory cache.
  */
 function scanWorkspaceStorage(storageRoot: string, provider: IDEPlatformProvider): RawRequest[] {
     const results: RawRequest[] = [];
@@ -62,23 +69,42 @@ function scanWorkspaceStorage(storageRoot: string, provider: IDEPlatformProvider
             catch { continue; }
 
             for (const f of files) {
-                if (!f.isFile() || !f.name.endsWith(fileExt)) { continue; }
+                const nameLower = f.name.toLowerCase();
+                if (!f.isFile() || (!nameLower.endsWith(fileExt.toLowerCase()) && !nameLower.endsWith('.json'))) { continue; }
 
                 try {
-                    const content = fs.readFileSync(path.join(chatDir, f.name), 'utf-8');
-                    const parsed = provider.parseChatFile(content);
-
-                    for (const req of parsed) {
-                        if (req.completed && req.model) {
-                            results.push({
-                                model: req.model,
-                                inputTokens: req.tokens?.prompt ?? 0,
-                                outputTokens: req.tokens?.output ?? 0,
-                                completed: true,
-                            });
+                    const filePath = path.join(chatDir, f.name);
+                    const stats = fs.statSync(filePath);
+                    
+                    let parsedRequests: RawRequest[];
+                    const cached = fileCache.get(filePath);
+                    if (cached && cached.mtime === stats.mtimeMs && cached.size === stats.size) {
+                        parsedRequests = cached.requests;
+                    } else {
+                        if (stats.size > 2 * 1024 * 1024) {
+                            // Skip files > 2MB to prevent thread blocking / out-of-memory crashes
+                            parsedRequests = [];
+                        } else {
+                            const content = fs.readFileSync(filePath, 'utf-8');
+                            const parsed = provider.parseChatFile(content);
+                            parsedRequests = parsed
+                                .filter(req => req.completed && req.model)
+                                .map(req => ({
+                                    model: req.model!,
+                                    inputTokens: req.tokens?.prompt ?? 0,
+                                    outputTokens: req.tokens?.output ?? 0,
+                                    completed: true,
+                                }));
                         }
+                        fileCache.set(filePath, {
+                            mtime: stats.mtimeMs,
+                            size: stats.size,
+                            requests: parsedRequests,
+                        });
                     }
-                } catch { /* ignore file read errors */ }
+                    
+                    results.push(...parsedRequests);
+                } catch { /* ignore file read/stat errors */ }
             }
         }
     } catch { /* ignore permission errors */ }
@@ -105,6 +131,7 @@ function aggregateRequests(raw: RawRequest[]): Record<string, IDEModelStat> {
 
 let cache: IDEUsageResult[] | null = null;
 let cacheTime = 0;
+let isDetecting = false;
 const CACHE_TTL_MS = 60_000; // 60 s
 
 export const manualUsage: Array<{ ideKey: string; req: RawRequest }> = [];
@@ -118,13 +145,19 @@ export function appendUsageSample(ideKey: string, model: string, inputTokens: nu
     invalidateIDEUsageCache();
 }
 
+/**
+ * Returns IDE usage data. If currently detecting, it will return the slightly 
+ * stale cache to prevent concurrent thread monopolization.
+ */
 export function detectIDEUsage(): IDEUsageResult[] {
     const now = Date.now();
-    if (cache && now - cacheTime < CACHE_TTL_MS) { return cache; }
+    if (cache && (now - cacheTime < CACHE_TTL_MS || isDetecting)) { return cache; }
 
-    const providers = getAllProviders();
+    isDetecting = true;
+    try {
+        const providers = getAllProviders();
 
-    const results: IDEUsageResult[] = providers.map(provider => {
+        const results: IDEUsageResult[] = providers.map(provider => {
         const allRaw: RawRequest[] = [];
         let detected = false;
 
@@ -158,9 +191,12 @@ export function detectIDEUsage(): IDEUsageResult[] {
         };
     });
 
-    cache = results;
-    cacheTime = now;
-    return results;
+        cache = results;
+        cacheTime = now;
+        return results;
+    } finally {
+        isDetecting = false;
+    }
 }
 
 /** Force the cache to expire on the next call (call after the server stops/starts). */

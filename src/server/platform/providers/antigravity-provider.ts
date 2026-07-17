@@ -145,48 +145,73 @@ export class AntigravityProvider implements IDEPlatformProvider {
 function parseAntigravityChat(content: string): ParsedChatRequest[] {
     const results: ParsedChatRequest[] = [];
 
-    // Try line-by-line JSON parsing (JSONL with role/content)
-    const lines = content.split('\n').filter(l => l.trim());
-
-    for (const line of lines) {
-        let obj: any;
-        try { obj = JSON.parse(line); } catch { continue; }
-
-        // Format A: { role: "user"|"assistant", content: "...", model: "..." }
-        if (obj.role && obj.content) {
-            results.push({
-                prompt: obj.role === 'user' ? obj.content : '',
-                response: obj.role === 'assistant' ? obj.content : '',
-                timestamp: obj.timestamp || Date.now(),
-                completed: obj.role === 'assistant',
-                model: obj.model || undefined,
-                tokens: obj.usage ? {
-                    prompt: obj.usage.prompt_tokens || obj.usage.inputTokens,
-                    output: obj.usage.completion_tokens || obj.usage.outputTokens,
-                } : undefined,
-            });
-            continue;
+    // Antigravity might use .json instead of .jsonl, attempt to parse the entire file first
+    let objects: any[] = [];
+    try {
+        const fullObj = JSON.parse(content);
+        if (Array.isArray(fullObj)) {
+            objects = fullObj;
+        } else if (fullObj.conversations) {
+            objects = fullObj.conversations;
+        } else {
+            objects = [fullObj];
         }
+    } catch {
+        // Fall back to line-by-line JSON parsing (JSONL)
+        const lines = content.split('\n').filter(l => l.trim());
+        for (const line of lines) {
+            try { objects.push(JSON.parse(line)); } catch { continue; }
+        }
+    }
 
-        // Format B: { conversations: [{ messages: [...] }] }
-        if (obj.conversations && Array.isArray(obj.conversations)) {
-            for (const conv of obj.conversations) {
-                const messages = conv.messages || conv.turns || [];
-                for (const msg of messages) {
-                    results.push({
-                        prompt: msg.role === 'user' ? (msg.content || msg.text || '') : '',
-                        response: msg.role === 'assistant' ? (msg.content || msg.text || '') : '',
-                        timestamp: msg.timestamp || conv.timestamp || Date.now(),
-                        completed: msg.role === 'assistant',
-                        model: msg.model || conv.model || undefined,
-                        tokens: msg.usage ? {
-                            prompt: msg.usage.prompt_tokens || msg.usage.inputTokens,
-                            output: msg.usage.completion_tokens || msg.usage.outputTokens,
-                        } : undefined,
-                    });
+    let currentReq: ParsedChatRequest | null = null;
+
+    for (const obj of objects) {
+        if (!obj || typeof obj !== 'object') continue;
+
+        const messages = obj.messages || obj.turns || (obj.role ? [obj] : []);
+        for (const msg of messages) {
+            if (!msg || typeof msg !== 'object') continue;
+
+            const role = msg.role || '';
+            const text = msg.content || msg.text || '';
+            const ts = msg.timestamp || obj.timestamp || Date.now();
+            const model = msg.model || obj.model || undefined;
+            
+            // Standardise token usage format
+            const inputTokens = msg.usage?.prompt_tokens || msg.usage?.inputTokens;
+            const outputTokens = msg.usage?.completion_tokens || msg.usage?.outputTokens;
+            const tokens = (inputTokens !== undefined || outputTokens !== undefined) 
+                ? { prompt: inputTokens, output: outputTokens } 
+                : undefined;
+
+            if (role === 'user') {
+                if (currentReq) {
+                    if (currentReq.response) {
+                        results.push(currentReq);
+                        currentReq = { prompt: text, response: '', timestamp: ts, completed: false };
+                    } else {
+                        // Consecutive user prompts: combine them
+                        currentReq.prompt += '\n\n' + text;
+                    }
+                } else {
+                    currentReq = { prompt: text, response: '', timestamp: ts, completed: false };
+                }
+            } else if (role === 'assistant' || role === 'model') {
+                if (!currentReq) {
+                    currentReq = { prompt: '', response: text, timestamp: ts, completed: true, model, tokens };
+                } else {
+                    currentReq.response += text;
+                    currentReq.completed = true;
+                    if (model) currentReq.model = model;
+                    if (tokens) currentReq.tokens = tokens;
                 }
             }
         }
+    }
+    
+    if (currentReq) {
+        results.push(currentReq);
     }
 
     return results;

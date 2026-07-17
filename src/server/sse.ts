@@ -11,22 +11,28 @@ class SSEManager {
 
     addClient(req: Request, res: Response) {
         res.writeHead(200, {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            // no-transform: tell Cloudflare/proxies not to compress or buffer
+            'Cache-Control': 'no-cache, no-transform',
             'Connection': 'keep-alive',
             'X-Accel-Buffering': 'no',
         });
+        res.flushHeaders?.();
 
         const id = String(++this.idCounter);
         this.clients.push({ id, res });
 
+        // 2KB comment padding: forces buffering proxies (Cloudflare tunnel)
+        // to flush the stream so the client sees events immediately
+        res.write(`:${' '.repeat(2048)}\n\n`);
+
         // Send initial connection event
         res.write(`event: connected\ndata: ${JSON.stringify({ id })}\n\n`);
 
-        // Heartbeat every 30s to keep connection alive
+        // Heartbeat every 15s to keep the tunnel connection alive
         const heartbeat = setInterval(() => {
             res.write(`:heartbeat\n\n`);
-        }, 30000);
+        }, 15000);
 
         req.on('close', () => {
             clearInterval(heartbeat);

@@ -5,18 +5,31 @@ import { initIDEBridge } from './server/ide-bridge';
 import { initChatReader, disposeChatReader } from './server/chat-reader';
 import { detectPlatform } from './server/platform';
 import * as qrcode from 'qrcode';
+import * as fs from 'fs';
 
 let server: RemoteServer | null = null;
 let tunnel: TunnelManager | null = null;
 let statusBar: vscode.StatusBarItem;
 
+function logDebug(msg: string) {
+    try {
+        fs.appendFileSync('i:\\remote-ide-extension\\extension_run_debug.log', `[${new Date().toISOString()}] ${msg}\n`);
+    } catch {}
+}
+
 export async function activate(context: vscode.ExtensionContext) {
-    // Detect IDE platform (VS Code, Cursor, Antigravity) before anything else
+    try {
+        fs.writeFileSync('i:\\remote-ide-extension\\extension_run_debug.log', `[${new Date().toISOString()}] Activation started...\n`);
+    } catch {}
+
     const platform = detectPlatform();
+    logDebug(`Platform detected: ${platform.displayName} (${platform.key})`);
     console.log(`[RemoteControl] Running on ${platform.displayName}`);
+
     const toggleCmd = vscode.commands.registerCommand(
         'remoteControl.toggle',
         async () => {
+            logDebug(`Toggle command triggered. server.isRunning=${server?.isRunning}`);
             if (server?.isRunning) {
                 await stopRemoteControl();
             } else {
@@ -27,12 +40,18 @@ export async function activate(context: vscode.ExtensionContext) {
 
     const settingsCmd = vscode.commands.registerCommand(
         'remoteControl.showSettings',
-        () => showSettingsPanel(context)
+        () => {
+            logDebug("Show settings command triggered.");
+            showSettingsPanel(context);
+        }
     );
 
     const qrCmd = vscode.commands.registerCommand(
         'remoteControl.showQR',
-        () => showQRCode(context)
+        () => {
+            logDebug("Show QR command triggered.");
+            showQRCode(context);
+        }
     );
 
     context.subscriptions.push(toggleCmd, settingsCmd, qrCmd);
@@ -42,23 +61,41 @@ export async function activate(context: vscode.ExtensionContext) {
     );
     statusBar.command = 'remoteControl.toggle';
     statusBar.text = '$(remote) Remote: OFF';
+    statusBar.tooltip = 'Click to start Remote Control';
     statusBar.show();
     context.subscriptions.push(statusBar);
+
+    vscode.window.showInformationMessage(
+        'Remote Control ready. Press Ctrl+Shift+R or click "Remote: OFF" in the status bar to start.',
+        'Start Now'
+    ).then(selection => {
+        if (selection === 'Start Now') {
+            logDebug("Start Now clicked from information message.");
+            vscode.commands.executeCommand('remoteControl.toggle');
+        }
+    });
 }
 
 async function startRemoteControl(context: vscode.ExtensionContext) {
     try {
+        logDebug("startRemoteControl() entered.");
+        statusBar.text = '$(sync~spin) Remote: Starting...';
+        statusBar.tooltip = 'Setting up remote control...';
+
         server = new RemoteServer(context);
+        logDebug("RemoteServer instance created.");
         const port = await server.start();
+        logDebug(`RemoteServer listening on port: ${port}`);
 
-        // Start broadcasting IDE events to connected clients
         initIDEBridge(context);
-
-        // Start reading chat sessions for live chat display
         initChatReader(context);
+        logDebug("IDE Bridge and Chat Reader initialized.");
 
         tunnel = new TunnelManager(context);
+        logDebug("TunnelManager instance created.");
+        statusBar.tooltip = 'Connecting to Cloudflare tunnel...';
         const publicUrl = await tunnel.start(port);
+        logDebug(`Tunnel started successfully. URL: ${publicUrl}`);
 
         statusBar.text = '$(remote) Remote: ON';
         statusBar.tooltip = publicUrl;
@@ -66,25 +103,23 @@ async function startRemoteControl(context: vscode.ExtensionContext) {
         showQRCode(context);
         vscode.window.showInformationMessage(`Remote Control active at ${publicUrl}`);
     } catch (err: any) {
-        vscode.window.showErrorMessage(`Remote Control failed: ${err.message}`);
+        logDebug(`startRemoteControl() failed with error: ${err.message}\nStack: ${err.stack}`);
+        vscode.window.showErrorMessage(`Remote Control failed: ${err.message}. Check the "Remote Control (Tunnel)" output panel for details.`);
         await stopRemoteControl();
     }
 }
 
-async function stopRemoteControl() {
-    disposeChatReader();
-    await tunnel?.stop();
-    await server?.stop();
-    server = null;
-    tunnel = null;
-    statusBar.text = '$(remote) Remote: OFF';
-    statusBar.tooltip = undefined;
-}
 
 function showQRCode(context: vscode.ExtensionContext) {
-    const url = tunnel?.getUrl();
+    let url = tunnel?.getUrl();
     if (!url) {
-        vscode.window.showWarningMessage('Remote Control is not running. Start it first.');
+        const tip = statusBar.tooltip;
+        if (typeof tip === 'string' && tip.startsWith('http')) {
+            url = tip;
+        }
+    }
+    if (!url) {
+        vscode.window.showWarningMessage('Remote Control is not running. Start it first (Ctrl+Shift+R or click "Remote: OFF" in status bar).');
         return;
     }
 
@@ -100,7 +135,7 @@ function showQRCode(context: vscode.ExtensionContext) {
 
     qrcode.toDataURL(fullUrl, { width: 300, margin: 2 }, (err, dataUrl) => {
         if (err) {
-            panel.webview.html = `<h2>Error generating QR code</h2>`;
+            panel.webview.html = `<h2>QR Code Error</h2><p>Could not generate QR code. Use the URL directly:</p><p><a href="${fullUrl}">${fullUrl}</a></p>`;
             return;
         }
         panel.webview.html = `<!DOCTYPE html>
@@ -108,7 +143,7 @@ function showQRCode(context: vscode.ExtensionContext) {
 <head><style>
     body { display:flex; flex-direction:column; align-items:center; justify-content:center;
            min-height:100vh; margin:0; font-family:system-ui; background:#1e1e1e; color:#ccc; }
-    img { border-radius:12px; margin:20px 0; }
+    img { border-radius:12px; margin:20px 0; max-width:90vw; }
     a { color:#4fc3f7; word-break:break-all; }
     .url-box { background:#2d2d2d; padding:12px 20px; border-radius:8px; margin:12px; max-width:90%; text-align:center; }
 </style></head>
@@ -134,6 +169,7 @@ function showSettingsPanel(context: vscode.ExtensionContext) {
     const pin = config.get<string>('pin', '');
     const tunnelMode = config.get<string>('tunnelMode', 'quick');
     const tunnelToken = config.get<string>('tunnelToken', '');
+    const customDomain = config.get<string>('customDomain', '');
 
     panel.webview.html = `<!DOCTYPE html>
 <html>
@@ -157,6 +193,8 @@ function showSettingsPanel(context: vscode.ExtensionContext) {
     </select>
     <label for="token">Tunnel Token</label>
     <input id="token" type="password" value="${tunnelToken}" placeholder="Required for named mode" />
+    <label for="customDomain">Custom Domain</label>
+    <input id="customDomain" type="text" value="${customDomain}" placeholder="e.g. https://my-ide.example.com" />
     <button onclick="save()">Save Settings</button>
     <script>
         const vscode = acquireVsCodeApi();
@@ -166,6 +204,7 @@ function showSettingsPanel(context: vscode.ExtensionContext) {
                 pin: document.getElementById('pin').value,
                 tunnelMode: document.getElementById('mode').value,
                 tunnelToken: document.getElementById('token').value,
+                customDomain: document.getElementById('customDomain').value,
             });
         }
     </script>
@@ -178,11 +217,25 @@ function showSettingsPanel(context: vscode.ExtensionContext) {
             await config.update('pin', msg.pin, vscode.ConfigurationTarget.Global);
             await config.update('tunnelMode', msg.tunnelMode, vscode.ConfigurationTarget.Global);
             await config.update('tunnelToken', msg.tunnelToken, vscode.ConfigurationTarget.Global);
+            await config.update('customDomain', msg.customDomain, vscode.ConfigurationTarget.Global);
             vscode.window.showInformationMessage('Settings saved. Restart Remote Control to apply.');
         }
     });
 }
 
+async function stopRemoteControl() {
+    logDebug("stopRemoteControl() entered.");
+    disposeChatReader();
+    await tunnel?.stop();
+    await server?.stop();
+    server = null;
+    tunnel = null;
+    statusBar.text = '$(remote) Remote: OFF';
+    statusBar.tooltip = undefined;
+    logDebug("stopRemoteControl() completed.");
+}
+
 export function deactivate() {
+    logDebug("deactivate() called.");
     stopRemoteControl();
 }

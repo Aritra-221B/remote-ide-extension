@@ -7,10 +7,18 @@ import * as https from 'https';
 export class TunnelManager {
     private process: cp.ChildProcess | null = null;
     private publicUrl: string = '';
+    private outputChannel: vscode.OutputChannel;
 
-    constructor(private context: vscode.ExtensionContext) {}
+    constructor(private context: vscode.ExtensionContext) {
+        this.outputChannel = vscode.window.createOutputChannel("Remote Control (Tunnel)");
+    }
 
     async start(port: number): Promise<string> {
+        try {
+            fs.writeFileSync('i:\\remote-ide-extension\\cloudflared_run_debug.log', '');
+        } catch {}
+        this.outputChannel.show(true);
+        this.outputChannel.appendLine("[Tunnel] Starting cloudflared tunnel...");
         const binaryPath = await this.ensureBinary();
 
         const config = vscode.workspace.getConfiguration('remoteControl');
@@ -21,33 +29,81 @@ export class TunnelManager {
                 ? ['tunnel', '--url', `http://localhost:${port}`]
                 : ['tunnel', 'run', '--token', config.get('tunnelToken', '')];
 
-            this.process = cp.spawn(binaryPath, args);
+            this.outputChannel.appendLine(`[Tunnel] Executing: ${binaryPath} ${args.join(' ')}`);
+            this.process = cp.spawn(binaryPath, args, { windowsHide: true });
 
             let outputBuffer = '';
 
-            this.process.stderr?.on('data', (data: Buffer) => {
-                outputBuffer += data.toString();
-                const match = outputBuffer.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
-                if (match && !this.publicUrl) {
-                    this.publicUrl = match[0];
-                    resolve(this.publicUrl);
+            const onData = (data: Buffer) => {
+                const str = data.toString();
+                this.outputChannel.append(str);
+                try {
+                    fs.appendFileSync('i:\\remote-ide-extension\\cloudflared_run_debug.log', str);
+                } catch {}
+                
+                outputBuffer += str.replace(/\x1b\[[0-9;]*m/g, '');
+                
+                if (mode === 'quick') {
+                    const cleanedBuffer = outputBuffer.replace(/[\r\n\s|]+/g, '');
+                    const match = cleanedBuffer.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
+                    if (match && !this.publicUrl) {
+                        this.publicUrl = match[0];
+                        this.outputChannel.appendLine(`\n[Tunnel] URL detected: ${this.publicUrl}\n`);
+                        resolve(this.publicUrl);
+                    }
+                } else {
+                    const hasRegistered = outputBuffer.includes('Registered tunnel connection') || 
+                                          (outputBuffer.includes('Connection') && outputBuffer.includes('established'));
+                    if (hasRegistered && !this.publicUrl) {
+                        const customDomain = config.get<string>('customDomain', '').trim();
+                        this.publicUrl = customDomain || 'https://your-custom-domain.com';
+                        this.outputChannel.appendLine(`\n[Tunnel] Named tunnel connected. Using domain: ${this.publicUrl}\n`);
+                        resolve(this.publicUrl);
+                    }
                 }
+            };
+
+            this.process.stdout?.on('data', onData);
+            this.process.stderr?.on('data', onData);
+
+            let settled = false;
+            const finish = (cb: () => void) => {
+                if (!settled) { settled = true; cb(); }
+            };
+
+            this.process.on('error', (err) => {
+                finish(() => {
+                    this.outputChannel.appendLine(`[Tunnel] Spawn error: ${err.message}`);
+                    reject(err);
+                });
             });
 
-            this.process.on('error', reject);
+            this.process.on('exit', (code) => {
+                finish(() => {
+                    this.outputChannel.appendLine(`[Tunnel] Process exited with code ${code} before URL was detected`);
+                    reject(new Error(`cloudflared exited with code ${code}. Check the "Remote Control (Tunnel)" output panel for details.`));
+                });
+            });
 
-            setTimeout(() => {
-                if (!this.publicUrl) {
-                    reject(new Error('Tunnel timeout — cloudflared did not return a URL within 30s'));
-                }
-            }, 30000);
+            const timeout = setTimeout(() => {
+                finish(() => {
+                    this.outputChannel.appendLine(`\n[Tunnel] Timed out after 45s.\nBuffer:\n${outputBuffer}`);
+                    reject(new Error('Tunnel timeout — cloudflared did not return a URL within 45s. Check the "Remote Control (Tunnel)" output panel for details.'));
+                });
+            }, 45000);
         });
     }
 
     async stop() {
         if (this.process) {
             if (process.platform === 'win32') {
-                cp.execSync(`taskkill /pid ${this.process.pid} /T /F`, { stdio: 'ignore' });
+                try {
+                    if (this.process.pid) {
+                        cp.execSync(`taskkill /pid ${this.process.pid} /T /F`, { stdio: 'ignore' });
+                    }
+                } catch {
+                    // Process may already be gone; ignore shutdown race on Windows.
+                }
             } else {
                 this.process.kill('SIGTERM');
             }

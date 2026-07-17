@@ -82,10 +82,15 @@ export class CDPClient {
         const selectors = this.getSelectors();
         try {
             const result = await this.client.Runtime.evaluate({
+                awaitPromise: true,
                 expression: `
-                    (() => {
+                    (async () => {
                         const input = document.querySelector(${JSON.stringify(selectors.chatInput)});
                         if (!input) return false;
+                        
+                        // Try to focus, but proceed even if obscuration prevents it
+                        try { input.focus(); } catch (e) {}
+
                         const nativeSet = Object.getOwnPropertyDescriptor(
                             window.HTMLTextAreaElement.prototype, 'value'
                         )?.set;
@@ -99,6 +104,8 @@ export class CDPClient {
                         } else {
                             // If no clear send button, trigger Enter key
                             input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                            await new Promise(r => setTimeout(r, 30)); // Delay to satisfy UI debouncing
+                            input.dispatchEvent(new KeyboardEvent('keyup',   { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
                         }
                         return true;
                     })()

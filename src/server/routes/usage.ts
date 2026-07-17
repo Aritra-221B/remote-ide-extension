@@ -99,11 +99,12 @@ export function usageRoutes() {
     router.get('/current-model', async (req, res) => {
         const platform = getPlatform();
 
-        // 1. Try VS Code Language Model API with platform-specific vendor
+        // 1. Try VS Code Language Model API with platform-specific vendor (fallback due to older @types)
         const vendor = platform.getLMVendor();
-        if (vendor) {
+        const vsLm = (vscode as any).lm;
+        if (vendor && vsLm?.selectChatModels) {
             try {
-                const models = await vscode.lm.selectChatModels({ vendor });
+                const models = await vsLm.selectChatModels({ vendor });
                 if (models.length > 0) {
                     const m = models[0];
                     res.json({

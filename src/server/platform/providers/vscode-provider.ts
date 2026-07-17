@@ -99,6 +99,60 @@ export class VSCodeProvider implements IDEPlatformProvider {
 // ─── Copilot JSONL Parser ─────────────────────────────────────────────────────
 
 /**
+ * Extract visible response text from a Copilot response array.
+ * Items may be plain strings, or objects with a `kind` marker
+ * (thinking, toolInvocationSerialized, mcpServersStarting, ...).
+ * Only kind-less items with a string `value` are actual response text.
+ */
+function extractResponseText(response: any): string {
+    if (!Array.isArray(response)) { return ''; }
+    return response.map((item: any) => {
+        if (typeof item === 'string') { return item; }
+        if (item && !item.kind && typeof item.value === 'string') { return item.value; }
+        return '';
+    }).join('');
+}
+
+/**
+ * Populate a request entry from a full request object as written by
+ * newer Copilot versions (>= 0.5x), where the whole request — response
+ * included — arrives as a single appended object.
+ */
+function fillFromRequestObject(entry: {
+    prompt: string;
+    response: string;
+    timestamp: number;
+    completed: boolean;
+    tokens?: { prompt?: number; output?: number };
+    model?: string;
+}, req: any): void {
+    if (req?.message?.text) { entry.prompt = req.message.text; }
+    if (req?.timestamp) { entry.timestamp = req.timestamp; }
+
+    const text = extractResponseText(req?.response);
+    if (text) { entry.response = text; }
+
+    if (req?.modelState?.value === 1 || req?.result) { entry.completed = true; }
+
+    const promptTokens = req?.promptTokens ?? req?.result?.metadata?.promptTokens;
+    const outputTokens = req?.completionTokens ?? req?.result?.metadata?.outputTokens;
+    if (promptTokens !== undefined || outputTokens !== undefined) {
+        entry.tokens = { prompt: promptTokens, output: outputTokens };
+    }
+
+    // Prefer the concrete resolved model over the "auto" alias
+    const autoResolution = Array.isArray(req?.response)
+        ? req.response.find((i: any) => i?.kind === 'autoModeResolution')
+        : null;
+    entry.model = autoResolution?.resolvedModel
+        || req?.result?.metadata?.modelId
+        || req?.modelId
+        || req?.model
+        || entry.model
+        || '';
+}
+
+/**
  * Parses the Copilot-style JSONL update log (kind/k/v format) used by
  * both VS Code Copilot and Cursor (which uses the same internal format).
  */
@@ -124,23 +178,30 @@ export function parseCopilotJsonl(content: string): ParsedChatRequest[] {
         const k: any[] = obj.k || [];
         const v: any = obj.v;
 
-        // kind=2, k=['requests'] — new request appended
+        // kind=0 — initial session snapshot; may contain restored requests
+        if (kind === 0 && Array.isArray(v?.requests)) {
+            for (const req of v.requests) {
+                const entry = { prompt: '', response: '', timestamp: 0, completed: false, model: '' };
+                fillFromRequestObject(entry, req);
+                requests.set(nextIndex, entry);
+                nextIndex++;
+            }
+        }
+
+        // kind=2, k=['requests'] — new request(s) appended.
+        // Newer Copilot versions write the FULL request object here,
+        // response included, so parse everything from it.
         if (kind === 2 && k.length === 1 && k[0] === 'requests' && Array.isArray(v)) {
             for (const req of v) {
-                const text = req?.message?.text || '';
-                const ts = req?.timestamp || Date.now();
-                requests.set(nextIndex, {
-                    prompt: text,
-                    response: '',
-                    timestamp: ts,
-                    completed: false,
-                    model: req?.model || '',
-                });
+                const entry = { prompt: '', response: '', timestamp: Date.now(), completed: false, model: '' };
+                fillFromRequestObject(entry, req);
+                requests.set(nextIndex, entry);
                 nextIndex++;
             }
         }
 
         // Fields on a specific request: k=['requests', N, fieldName]
+        // (older Copilot versions stream updates this way)
         if (k[0] === 'requests' && typeof k[1] === 'number' && k.length === 3) {
             const idx = k[1];
             const field = k[2];
@@ -150,10 +211,8 @@ export function parseCopilotJsonl(content: string): ParsedChatRequest[] {
             }
             const entry = requests.get(idx)!;
 
-            if (field === 'response' && Array.isArray(v)) {
-                const text = v.map((item: any) =>
-                    typeof item === 'string' ? item : (item?.value || '')
-                ).join('');
+            if (field === 'response') {
+                const text = extractResponseText(v);
                 if (text) { entry.response = text; }
             }
 

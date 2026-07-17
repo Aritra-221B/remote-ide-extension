@@ -4,6 +4,12 @@ import * as path from 'path';
 import { sseManager } from './sse';
 import { getPlatform } from './platform';
 
+function logDebug(msg: string) {
+    try {
+        fs.appendFileSync('i:\\remote-ide-extension\\extension_run_debug.log', `[${new Date().toISOString()}] [ChatReader] ${msg}\n`);
+    } catch {}
+}
+
 export interface ChatMessage {
     role: 'user' | 'assistant';
     text: string;
@@ -96,12 +102,13 @@ export function initChatReader(context: vscode.ExtensionContext): void {
         } catch { /* ignore */ }
     }
 
+
     if (!chatSessionsDir) {
-        console.log(`[ChatReader] No chatSessions directory found for ${platform.displayName}`);
+        logDebug(`No chatSessions directory found for ${platform.displayName}`);
         return;
     }
 
-    console.log(`[ChatReader] Using: ${chatSessionsDir} (${platform.displayName})`);
+    logDebug(`Using chat directory: ${chatSessionsDir} (${platform.displayName})`);
     selectActiveSession();
 
     // 800 ms safety-net poll — catches anything fs.watch misses
@@ -118,7 +125,7 @@ function selectActiveSession(): void {
 
     try {
         const files = fs.readdirSync(chatSessionsDir)
-            .filter(f => f.endsWith(fileExt))
+            .filter(f => f.endsWith(fileExt) || f.endsWith('.json'))
             .map(f => {
                 const full = path.join(chatSessionsDir, f);
                 const stat = fs.statSync(full);
@@ -134,7 +141,7 @@ function selectActiveSession(): void {
             activeSessionFile = newest;
             lastFileSize = 0;
             cachedMessages = [];
-            console.log(`[ChatReader] Active session: ${path.basename(newest)}`);
+            logDebug(`Active session changed to: ${path.basename(newest)}`);
             watchActiveFile(newest);
             checkForUpdates();
         }

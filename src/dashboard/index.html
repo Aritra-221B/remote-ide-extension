@@ -13,7 +13,6 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <!-- SVG Icon Definitions -->
     <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
         <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -72,7 +71,6 @@
     </svg>
 
     <div id="app" class="app">
-        <!-- Header -->
         <header class="header">
             <div class="header-left">
                 <svg class="header-icon" width="18" height="18"><use href="#i-zap"/></svg>
@@ -86,7 +84,6 @@
             </div>
         </header>
 
-        <!-- IDE Status Strip -->
         <div id="ide-status-bar" class="status-strip">
             <span id="ide-active-file" class="sf-file">No file open</span>
             <span class="sf-sep"></span>
@@ -94,9 +91,7 @@
             <span id="ide-diagnostics" class="sf-meta"></span>
         </div>
 
-        <!-- Main Content Area -->
         <main class="content">
-            <!-- Chat Panel -->
             <div id="tab-chat" class="panel active">
                 <div id="chat-container" class="chat-container">
                     <div class="empty-state">
@@ -112,7 +107,6 @@
                 </div>
             </div>
 
-            <!-- Files Panel -->
             <div id="tab-files" class="panel">
                 <div class="breadcrumb" id="file-breadcrumb">
                     <button onclick="navigateFiles('')" class="crumb">
@@ -132,7 +126,6 @@
                 </div>
             </div>
 
-            <!-- Terminal Panel -->
             <div id="tab-terminal" class="panel">
                 <div id="terminal-output" class="terminal-output"><span class="term-prompt">$</span> Ready for commands...\n</div>
                 <div class="input-bar">
@@ -143,19 +136,17 @@
                 </div>
             </div>
 
-            <!-- Usage Panel -->
             <div id="tab-usage" class="panel">
                 <div class="kpi-grid" id="usage-kpis"></div>
                 <div id="ide-breakdown" class="ide-breakdown"></div>
-                <button onclick="refreshUsage()" class="btn-outline" style="margin-top:8px">
+                <button onclick="refreshUsage()" class="btn-outline refresh-btn">
                     <svg width="15" height="15"><use href="#i-refresh"/></svg>
                     <span>Refresh</span>
                 </button>
             </div>
 
-            <!-- Bugs Panel -->
             <div id="tab-bugs" class="panel">
-                <button onclick="showNewBugForm()" class="btn-outline" style="margin-bottom:12px">
+                <button onclick="showNewBugForm()" class="btn-outline report-bug-btn">
                     <svg width="15" height="15"><use href="#i-plus"/></svg>
                     <span>Report Bug</span>
                 </button>
@@ -171,7 +162,6 @@
                 <div id="bug-list" class="bug-list"></div>
             </div>
 
-            <!-- Screenshot Panel -->
             <div id="tab-screenshot" class="panel">
                 <div class="screenshot-area">
                     <button onclick="captureScreenshot()" class="btn-capture" id="capture-btn">
@@ -185,7 +175,6 @@
             </div>
         </main>
 
-        <!-- Floating Quick Actions (hidden until agent edits detected) -->
         <div class="quick-actions hidden" id="quick-actions">
             <button onclick="sendAction('accept', this)" class="qa-btn qa-accept" aria-label="Accept">
                 <svg width="18" height="18"><use href="#i-check"/></svg>
@@ -197,7 +186,6 @@
             </button>
         </div>
 
-        <!-- Bottom Navigation -->
         <nav class="bottom-nav" id="bottom-nav">
             <button class="nav-item active" data-tab="chat" aria-label="Chat">
                 <svg width="20" height="20"><use href="#i-chat"/></svg>
