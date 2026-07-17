@@ -134,7 +134,7 @@
 
             <div id="tab-terminal" class="panel">
                 <div class="terminal-controls">
-                    <select id="terminal-select" onchange="switchTerminal(this.value)">
+                    <select id="terminal-select" onfocus="refreshTerminalList()" onchange="switchTerminal(this.value)">
                         <option value="">No active terminals</option>
                     </select>
                     <button onclick="createNewTerminal()" class="btn-terminal-create" aria-label="Create new terminal">

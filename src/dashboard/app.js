@@ -663,6 +663,15 @@ async function createNewTerminal() {
     }
 }
 
+async function refreshTerminalList() {
+    try {
+        const data = await api('/terminal/list');
+        if (data.success && data.terminals) {
+            updateTerminalList(data.terminals);
+        }
+    } catch {}
+}
+
 async function switchTerminal(index) {
     if (index === "") return;
     try {
