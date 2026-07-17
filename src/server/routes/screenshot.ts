@@ -108,7 +108,44 @@ export function screenshotRoutes() {
         res.json({ success: true, image: `data:image/jpeg;base64,${data}` });
     });
 
+    router.post('/send-keys', (req, res) => {
+        const { keys, raw, appendEnter } = req.body;
+        if (!keys) {
+            return res.status(400).json({ success: false, error: 'Keys required' });
+        }
+
+        let keysToSend = keys;
+        if (raw) {
+            keysToSend = escapeSendKeys(keys);
+        }
+        if (appendEnter) {
+            keysToSend += '{ENTER}';
+        }
+
+        const escapedKeys = keysToSend.replace(/'/g, "''");
+        const cmd = `powershell -Command "[void] [System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); [System.Windows.Forms.SendKeys]::SendWait('${escapedKeys}')"`;
+        cp.exec(cmd, (err) => {
+            if (err) {
+                res.json({ success: false, error: err.message });
+            } else {
+                res.json({ success: true });
+            }
+        });
+    });
+
     return router;
+}
+
+function escapeSendKeys(text: string): string {
+    let escaped = '';
+    for (const char of text) {
+        if ('+^%~()[]{}'.indexOf(char) !== -1) {
+            escaped += `{${char}}`;
+        } else {
+            escaped += char;
+        }
+    }
+    return escaped;
 }
 
 export function cleanupScreenshots() {

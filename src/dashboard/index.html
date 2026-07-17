@@ -197,6 +197,23 @@
                         <img id="screenshot-img" src="" alt="No screenshot yet" />
                     </div>
                 </div>
+                <div class="screen-keyboard-container">
+                    <div class="screen-keyboard-keys">
+                        <button onclick="sendActiveKey('{ESC}')" class="btn-key">ESC</button>
+                        <button onclick="sendActiveKey('{TAB}')" class="btn-key">TAB</button>
+                        <button onclick="sendActiveKey('{UP}')" class="btn-key btn-key-arrow">▲</button>
+                        <button onclick="sendActiveKey('{DOWN}')" class="btn-key btn-key-arrow">▼</button>
+                        <button onclick="sendActiveKey('^c')" class="btn-key">CTRL+C</button>
+                        <button onclick="sendActiveKey('{BACKSPACE}')" class="btn-key">BKSP</button>
+                        <button onclick="sendActiveKey('{ENTER}')" class="btn-key">ENTER</button>
+                    </div>
+                    <div class="input-bar">
+                        <input id="screen-kb-input" type="text" placeholder="Type text to active window..." />
+                        <button onclick="sendActiveText()" class="btn-send" aria-label="Send">
+                            <svg width="18" height="18"><use href="#i-send"/></svg>
+                        </button>
+                    </div>
+                </div>
             </div>
         </main>
 

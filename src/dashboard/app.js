@@ -924,6 +924,58 @@ async function captureScreenshot() {
     }
 }
 
+async function sendActiveKey(keys) {
+    try {
+        const data = await api('/screenshot/send-keys', {
+            method: 'POST',
+            body: JSON.stringify({ keys, raw: false })
+        });
+        if (data.success) {
+            setTimeout(captureScreenshot, 300);
+        } else {
+            showToast(`Error: ${data.error}`);
+        }
+    } catch (err) {
+        showToast(`Error: ${err.message}`);
+    }
+}
+
+async function sendActiveText() {
+    const input = document.getElementById('screen-kb-input');
+    if (!input) return;
+    const text = input.value;
+    if (!text) return;
+    input.value = '';
+
+    try {
+        const data = await api('/screenshot/send-keys', {
+            method: 'POST',
+            body: JSON.stringify({ keys: text, raw: true, appendEnter: true })
+        });
+        if (data.success) {
+            setTimeout(captureScreenshot, 500);
+        } else {
+            showToast(`Error: ${data.error}`);
+        }
+    } catch (err) {
+        showToast(`Error: ${err.message}`);
+    }
+}
+
+function bindScreenInput() {
+    const input = document.getElementById('screen-kb-input');
+    if (input) {
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                sendActiveText();
+            }
+        });
+    }
+}
+bindScreenInput();
+document.addEventListener('DOMContentLoaded', bindScreenInput);
+
 function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str || '';

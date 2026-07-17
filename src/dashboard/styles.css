@@ -1410,6 +1410,28 @@ body {
     display: none;
 }
 
+.screen-keyboard-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 12px;
+    flex-shrink: 0;
+    width: 100%;
+}
+
+.screen-keyboard-keys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-bottom: 4px;
+}
+
+.screen-keyboard-keys .btn-key {
+    flex: 1 1 calc(25% - 5px);
+    min-width: calc(25% - 5px);
+    max-width: calc(25% - 5px);
+}
+
 :focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
@@ -1482,4 +1504,112 @@ button:focus:not(:focus-visible) {
 
 ::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
+}
+
+@media (orientation: landscape) {
+    .app {
+        max-width: none !important;
+        height: 100vh;
+    }
+    
+    .header,
+    .status-strip {
+        display: none !important;
+    }
+    
+    .panel {
+        padding: 6px 12px !important;
+    }
+    
+    .bottom-nav {
+        height: 40px !important;
+        padding-bottom: 0 !important;
+    }
+    
+    .nav-item {
+        min-height: 38px !important;
+        padding: 2px 2px !important;
+        flex-direction: row !important;
+        gap: 6px !important;
+    }
+    
+    .nav-item span {
+        font-size: 11px !important;
+    }
+
+    /* Screen Capture Tab Landscape Optimization */
+    .screenshot-area {
+        flex-direction: row !important;
+        align-items: stretch !important;
+        height: 100% !important;
+        gap: 12px !important;
+    }
+
+    .btn-capture {
+        padding: 10px 16px !important;
+        font-size: 12px !important;
+        flex-shrink: 0 !important;
+        height: fit-content !important;
+        min-height: auto !important;
+    }
+
+    .screenshot-result {
+        flex: 1 !important;
+        height: 100% !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        overflow: hidden !important;
+    }
+
+    .screenshot-result img {
+        max-height: 80vh !important;
+        max-width: 100% !important;
+        width: auto !important;
+        height: auto !important;
+        object-fit: contain !important;
+    }
+
+    /* Terminal Tab Landscape Optimization */
+    .terminal-keyboard {
+        flex-wrap: nowrap !important;
+        gap: 4px !important;
+        padding: 4px 0 !important;
+    }
+
+    .btn-key {
+        flex: 1 1 auto !important;
+        min-width: auto !important;
+        max-width: none !important;
+        padding: 6px 0 !important;
+        font-size: 10px !important;
+    }
+    
+    .terminal-controls {
+        padding-bottom: 4px !important;
+    }
+    
+    .input-bar {
+        padding-top: 4px !important;
+    }
+
+    /* Screen Keyboard Landscape Optimization */
+    .screen-keyboard-container {
+        padding-top: 4px !important;
+        width: 100% !important;
+    }
+
+    .screen-keyboard-keys {
+        flex-wrap: nowrap !important;
+        gap: 4px !important;
+        padding-bottom: 2px !important;
+    }
+
+    .screen-keyboard-keys .btn-key {
+        flex: 1 1 auto !important;
+        min-width: auto !important;
+        max-width: none !important;
+        padding: 6px 0 !important;
+        font-size: 10px !important;
+    }
 }
