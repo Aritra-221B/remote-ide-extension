@@ -93,6 +93,12 @@
 
         <main class="content">
             <div id="tab-chat" class="panel active">
+                <div class="chat-header-bar">
+                    <span class="chat-model-label">Model:</span>
+                    <select id="chat-model-select" onchange="updateModel(this)">
+                        <option value="">Loading models...</option>
+                    </select>
+                </div>
                 <div id="chat-container" class="chat-container">
                     <div class="empty-state">
                         <svg width="32" height="32" class="empty-icon"><use href="#i-chat"/></svg>
@@ -127,7 +133,26 @@
             </div>
 
             <div id="tab-terminal" class="panel">
+                <div class="terminal-controls">
+                    <select id="terminal-select" onchange="switchTerminal(this.value)">
+                        <option value="">No active terminals</option>
+                    </select>
+                    <button onclick="createNewTerminal()" class="btn-terminal-create" aria-label="Create new terminal">
+                        <svg width="14" height="14"><use href="#i-plus"/></svg>
+                        <span>New Terminal</span>
+                    </button>
+                </div>
                 <div id="terminal-output" class="terminal-output"><span class="term-prompt">$</span> Ready for commands...\n</div>
+                <div class="terminal-keyboard">
+                    <button onclick="sendTerminalKey('Esc')" class="btn-key">ESC</button>
+                    <button onclick="sendTerminalKey('Tab')" class="btn-key">TAB</button>
+                    <button onclick="sendTerminalKey('Ctrl+C')" class="btn-key">CTRL+C</button>
+                    <button onclick="sendTerminalKey('Ctrl+D')" class="btn-key">CTRL+D</button>
+                    <button onclick="sendTerminalKey('Up')" class="btn-key btn-key-arrow">▲</button>
+                    <button onclick="sendTerminalKey('Down')" class="btn-key btn-key-arrow">▼</button>
+                    <button onclick="sendTerminalKey('Left')" class="btn-key btn-key-arrow">◀</button>
+                    <button onclick="sendTerminalKey('Right')" class="btn-key btn-key-arrow">▶</button>
+                </div>
                 <div class="input-bar">
                     <input id="cmd-input" type="text" placeholder="Enter command..." />
                     <button onclick="executeCommand()" class="btn-send" aria-label="Run">

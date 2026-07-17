@@ -564,14 +564,22 @@ function closeFileViewer() {
 }
 
 async function loadTerminal() {
-    const data = await api('/terminal/output');
+    const [outputData, listData] = await Promise.all([
+        api('/terminal/output'),
+        api('/terminal/list').catch(() => ({ terminals: [] }))
+    ]);
     const output = document.getElementById('terminal-output');
-    if (data.output) {
-        output.textContent = data.output;
+    if (outputData.output) {
+        output.textContent = outputData.output;
     } else {
         output.textContent = '$ Ready for commands...\n';
     }
     output.scrollTop = output.scrollHeight;
+    
+    if (listData.terminals) {
+        updateTerminalList(listData.terminals);
+    }
+
     const cmdInput = document.getElementById('cmd-input');
     if (cmdInput) cmdInput.focus();
     startTerminalPoll();
@@ -638,6 +646,65 @@ function bindTerminalInput() {
 }
 bindTerminalInput();
 document.addEventListener('DOMContentLoaded', bindTerminalInput);
+
+async function createNewTerminal() {
+    const name = prompt("Enter a name for the new terminal (optional):");
+    try {
+        const data = await api('/terminal/create', {
+            method: 'POST',
+            body: JSON.stringify({ name }),
+        });
+        if (data.success && data.terminals) {
+            updateTerminalList(data.terminals);
+            showToast("Created terminal");
+        }
+    } catch (err) {
+        showToast(`Error creating terminal: ${err.message}`);
+    }
+}
+
+async function switchTerminal(index) {
+    if (index === "") return;
+    try {
+        const data = await api('/terminal/switch', {
+            method: 'POST',
+            body: JSON.stringify({ index }),
+        });
+        if (data.success) {
+            showToast("Switched terminal");
+        }
+    } catch (err) {
+        showToast(`Error switching terminal: ${err.message}`);
+    }
+}
+
+async function sendTerminalKey(key) {
+    try {
+        const data = await api('/terminal/key', {
+            method: 'POST',
+            body: JSON.stringify({ key }),
+        });
+        if (!data.success) {
+            showToast(`Failed to send ${key}`);
+        }
+    } catch (err) {
+        showToast(`Error sending key: ${err.message}`);
+    }
+}
+
+function updateTerminalList(terminals) {
+    const select = document.getElementById('terminal-select');
+    if (!select) return;
+    if (!terminals || terminals.length === 0) {
+        select.innerHTML = '<option value="">No active terminals</option>';
+        return;
+    }
+    const currentVal = select.value;
+    select.innerHTML = terminals.map(t => {
+        const isSel = t.active || (currentVal === "" && t.index === 0) ? 'selected' : '';
+        return `<option value="${t.index}" ${isSel}>${escapeHtml(t.name)}</option>`;
+    }).join('');
+}
 
 async function refreshUsage() {
     const [breakdown, modelData] = await Promise.all([
@@ -743,17 +810,26 @@ async function refreshUsage() {
 
 async function updateModel(select) {
     const model = select.value;
-    select.disabled = true;
+    const selects = document.querySelectorAll('.model-select, #chat-model-select');
+    selects.forEach(s => s.disabled = true);
     try {
         const data = await api('/usage/current-model', {
             method: 'POST',
             body: JSON.stringify({ model })
         });
-        showToast(data.success ? `Switched to ${model}` : `Error: ${data.error}`);
+        if (data.success) {
+            showToast(`Switched model to ${model}`);
+            selects.forEach(s => s.value = model);
+            if (isActiveTab('usage')) {
+                refreshUsage();
+            }
+        } else {
+            showToast(`Error: ${data.error}`);
+        }
     } catch (e) {
         showToast(`Error: ${e.message}`);
     }
-    select.disabled = false;
+    selects.forEach(s => s.disabled = false);
 }
 
 async function loadBugs() {
@@ -863,7 +939,22 @@ function escapeHtmlAttr(str) {
         .replace(/\\/g, '\\\\');
 }
 
-fetchPlatformInfo().then(() => {
+fetchPlatformInfo().then(async () => {
+    try {
+        const modelData = await api('/usage/current-model');
+        const chatSelect = document.getElementById('chat-model-select');
+        if (chatSelect && platformInfo.supportedModels) {
+            if (platformInfo.supportedModels.length > 0) {
+                chatSelect.innerHTML = platformInfo.supportedModels.map(m => 
+                    `<option value="${m}" ${m === modelData.model ? 'selected' : ''}>${m}</option>`
+                ).join('');
+            } else {
+                chatSelect.innerHTML = `<option value="">${modelData.model || 'N/A'}</option>`;
+                chatSelect.disabled = true;
+            }
+        }
+    } catch (e) { }
+
     connectSSE();
     loadChat();
     fetchIDEStatus();

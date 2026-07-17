@@ -4,6 +4,7 @@ import { TunnelManager } from './server/tunnel';
 import { initIDEBridge } from './server/ide-bridge';
 import { initChatReader, disposeChatReader } from './server/chat-reader';
 import { detectPlatform } from './server/platform';
+import { cleanupScreenshots } from './server/routes/screenshot';
 import * as qrcode from 'qrcode';
 import * as fs from 'fs';
 
@@ -226,6 +227,9 @@ function showSettingsPanel(context: vscode.ExtensionContext) {
 async function stopRemoteControl() {
     logDebug("stopRemoteControl() entered.");
     disposeChatReader();
+    try {
+        cleanupScreenshots();
+    } catch {}
     await tunnel?.stop();
     await server?.stop();
     server = null;

@@ -110,3 +110,17 @@ export function screenshotRoutes() {
 
     return router;
 }
+
+export function cleanupScreenshots() {
+    const tmpDir = os.tmpdir();
+    try {
+        const files = fs.readdirSync(tmpDir);
+        for (const f of files) {
+            if (f.startsWith('remote-ide-shot-')) {
+                try {
+                    fs.unlinkSync(path.join(tmpDir, f));
+                } catch { /* ignore error unlinking file */ }
+            }
+        }
+    } catch { /* ignore directory read errors */ }
+}

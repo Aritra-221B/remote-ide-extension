@@ -101,8 +101,71 @@ export function terminalRoutes() {
         const terminals = vscode.window.terminals.map((t, i) => ({
             index: i,
             name: t.name,
+            active: vscode.window.activeTerminal === t
         }));
         res.json({ success: true, terminals });
+    });
+
+    router.post('/create', (req, res) => {
+        const { name } = req.body;
+        const count = vscode.window.terminals.length + 1;
+        const tName = name || `Remote (Terminal ${count})`;
+        const terminal = vscode.window.createTerminal(tName);
+        terminal.show();
+        
+        const terminals = vscode.window.terminals.map((t, i) => ({
+            index: i,
+            name: t.name,
+            active: vscode.window.activeTerminal === t
+        }));
+        res.json({
+            success: true,
+            terminals,
+            activeIndex: vscode.window.terminals.indexOf(terminal)
+        });
+    });
+
+    router.post('/switch', (req, res) => {
+        const { index } = req.body;
+        const idx = parseInt(index, 10);
+        if (isNaN(idx) || idx < 0 || idx >= vscode.window.terminals.length) {
+            return res.status(400).json({ success: false, error: 'Invalid terminal index' });
+        }
+        const terminal = vscode.window.terminals[idx];
+        terminal.show();
+        res.json({ success: true });
+    });
+
+    router.post('/key', (req, res) => {
+        const { key } = req.body;
+        if (!key) {
+            return res.status(400).json({ success: false, error: 'Key required' });
+        }
+
+        let controlCode = '';
+        if (key === 'Ctrl+C') controlCode = '\x03';
+        else if (key === 'Ctrl+D') controlCode = '\x04';
+        else if (key === 'Tab') controlCode = '\t';
+        else if (key === 'Esc') controlCode = '\x1b';
+        else if (key === 'Up') controlCode = '\x1b[A';
+        else if (key === 'Down') controlCode = '\x1b[B';
+        else if (key === 'Left') controlCode = '\x1b[D';
+        else if (key === 'Right') controlCode = '\x1b[C';
+
+        if (controlCode) {
+            // Write to VS Code integrated terminal
+            const terminal = vscode.window.activeTerminal;
+            if (terminal) {
+                terminal.sendText(controlCode, false);
+            }
+            // Also write to background persistent shell
+            if (persistentShell && persistentShell.stdin && !persistentShell.killed) {
+                persistentShell.stdin.write(controlCode);
+            }
+            res.json({ success: true });
+        } else {
+            res.status(400).json({ success: false, error: 'Unsupported key' });
+        }
     });
 
     return router;
